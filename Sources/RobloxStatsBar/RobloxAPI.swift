@@ -42,6 +42,15 @@ struct MetricSourceStatus {
     let status: String
     let source: String
     let detail: String
+    let value: String?
+
+    init(title: String, status: String, source: String, detail: String, value: String? = nil) {
+        self.title = title
+        self.status = status
+        self.source = source
+        self.detail = detail
+        self.value = value
+    }
 }
 
 enum RobloxAPIError: LocalizedError {

@@ -7,6 +7,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshNow), keyEquivalent: "r")
     private let manageItem = NSMenuItem(title: "Manage Games...", action: #selector(showManageWindow), keyEquivalent: ",")
     private let configStore = ConfigStore()
+    private let dashboardMetricsStore = DashboardMetricsStore()
     private let api = RobloxAPI()
     private let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -34,6 +35,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     private var gamesStackView: NSStackView?
     private var inputField: NSTextField?
     private var statusLabel: NSTextField?
+    private var hasStatusIcon = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         refreshItem.target = self
@@ -58,9 +60,50 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        button.title = "RBX --"
+        if let image = robloxStudioIcon() {
+            button.image = image
+            button.imagePosition = .imageLeading
+            button.imageScaling = .scaleProportionallyDown
+            hasStatusIcon = true
+        }
+
+        setStatusText("--")
         button.toolTip = "Roblox stats"
         statusItem.menu = statusMenu
+    }
+
+    private func robloxStudioIcon() -> NSImage? {
+        let workspace = NSWorkspace.shared
+        let bundleIdentifiers = [
+            "com.roblox.RobloxStudio",
+            "com.Roblox.RobloxStudio",
+        ]
+
+        for bundleIdentifier in bundleIdentifiers {
+            if let url = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+                return appIcon(at: url)
+            }
+        }
+
+        let candidatePaths = [
+            "/Applications/RobloxStudio.app",
+            "/Applications/Roblox Studio.app",
+            "\(NSHomeDirectory())/Applications/RobloxStudio.app",
+            "\(NSHomeDirectory())/Applications/Roblox Studio.app",
+        ]
+
+        for path in candidatePaths where FileManager.default.fileExists(atPath: path) {
+            return appIcon(at: URL(fileURLWithPath: path))
+        }
+
+        return nil
+    }
+
+    private func appIcon(at url: URL) -> NSImage {
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        image.size = NSSize(width: 17, height: 17)
+        image.isTemplate = false
+        return image
     }
 
     private func rebuildMenu() {
@@ -105,7 +148,8 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         addMetric(title: "Favorites", value: compact(snapshot.totalFavorites), x: 246, y: 84, to: view)
 
         addMetric(title: "Tracked games", value: "\(snapshot.games.count)", x: 14, y: 34, to: view)
-        addMetric(title: "Dashboard stats", value: "\(snapshot.dashboardMetrics.count) pending", x: 130, y: 34, to: view)
+        let cachedDashboardCount = snapshot.dashboardMetrics.filter { $0.value != nil }.count
+        addMetric(title: "Dashboard stats", value: "\(cachedDashboardCount)/\(snapshot.dashboardMetrics.count)", x: 130, y: 34, to: view)
         addMetric(title: "Updated", value: dateFormatter.string(from: snapshot.capturedAt), x: 246, y: 34, to: view)
 
         return viewMenuItem(view)
@@ -132,8 +176,9 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
 
         for (index, metric) in metrics.enumerated() {
             let y = view.frame.height - 52 - CGFloat(index) * rowHeight
+            let statusText = metric.value ?? metric.status
             view.addSubview(label(metric.title, frame: NSRect(x: 14, y: y + 14, width: 122, height: 16), font: .systemFont(ofSize: 11, weight: .medium), color: .labelColor))
-            view.addSubview(label(metric.status, frame: NSRect(x: 140, y: y + 14, width: 62, height: 16), font: .systemFont(ofSize: 10, weight: .semibold), color: .secondaryLabelColor))
+            view.addSubview(label(statusText, frame: NSRect(x: 140, y: y + 14, width: 62, height: 16), font: .systemFont(ofSize: 10, weight: .semibold), color: .secondaryLabelColor))
             view.addSubview(label(metric.source, frame: NSRect(x: 206, y: y + 14, width: 140, height: 16), font: .systemFont(ofSize: 10), color: .secondaryLabelColor))
             view.addSubview(label(metric.detail, frame: NSRect(x: 14, y: y, width: 332, height: 14), font: .systemFont(ofSize: 10), color: .tertiaryLabelColor))
         }
@@ -180,22 +225,15 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         config = configStore.load()
         let enabledIds = trackedGames().map(\.universeId)
         if enabledIds.isEmpty {
-            snapshot = RobloxStatsSnapshot(capturedAt: Date(), games: [], dashboardMetrics: [
-                MetricSourceStatus(title: "D1 retention", status: "Waiting", source: "Config", detail: "Add games first"),
-                MetricSourceStatus(title: "D7 retention", status: "Waiting", source: "Config", detail: "Add games first"),
-                MetricSourceStatus(title: "72h Robux sales", status: "Waiting", source: "Config", detail: "Add games first"),
-                MetricSourceStatus(title: "Total sales", status: "Waiting", source: "Config", detail: "Add games first"),
-                MetricSourceStatus(title: "Performance errors", status: "Waiting", source: "Config", detail: "Add games first"),
-                MetricSourceStatus(title: "Playthrough rate", status: "Waiting", source: "Config", detail: "Add games first"),
-            ])
-            setStatusText("RBX --")
+            snapshot = RobloxStatsSnapshot(capturedAt: Date(), games: [], dashboardMetrics: DashboardMetricsStore.waitingStatuses())
+            setStatusText("--")
             rebuildMenu()
             return
         }
 
         isRefreshing = true
         refreshItem.isEnabled = false
-        setStatusText("RBX ...")
+        setStatusText("...")
 
         api.loadSnapshot(universeIds: enabledIds) { [weak self] result in
             guard let self else {
@@ -207,12 +245,18 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
 
             switch result {
             case .success(let snapshot):
-                self.snapshot = snapshot
+                let dashboardMetrics = self.dashboardMetricsStore.metricStatuses(for: enabledIds)
+                let mergedSnapshot = RobloxStatsSnapshot(
+                    capturedAt: snapshot.capturedAt,
+                    games: snapshot.games,
+                    dashboardMetrics: dashboardMetrics
+                )
+                self.snapshot = mergedSnapshot
                 self.mergeNames(from: snapshot.games)
-                self.setStatusText("RBX \(self.compact(snapshot.totalCCU))")
-                self.statusItem.button?.toolTip = "Roblox stats: \(self.compact(snapshot.totalCCU)) CCU across \(snapshot.games.count) games"
+                self.setStatusText(self.compact(mergedSnapshot.totalCCU))
+                self.statusItem.button?.toolTip = "Roblox stats: \(self.compact(mergedSnapshot.totalCCU)) CCU across \(mergedSnapshot.games.count) games"
             case .failure(let error):
-                self.setStatusText("RBX --")
+                self.setStatusText("--")
                 self.statusItem.button?.toolTip = error.localizedDescription
             }
 
@@ -431,7 +475,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func setStatusText(_ text: String) {
-        statusItem.button?.title = text
+        statusItem.button?.title = hasStatusIcon ? " \(text)" : text
     }
 
     private func compact(_ value: Int) -> String {

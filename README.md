@@ -41,3 +41,28 @@ Config is stored locally:
 ```
 
 Use **Manage Games...** from the menu bar to add universe IDs, Roblox game URLs, or Creator Hub experience URLs.
+
+Optional dashboard metric cache:
+
+```text
+~/.config/roblox-stats-bar/dashboard-metrics.json
+```
+
+Example shape:
+
+```json
+{
+  "metrics": [
+    {
+      "universeId": 1234567890,
+      "d1Retention": "18.4%",
+      "d7Retention": "4.9%",
+      "robuxSales72h": "12,340",
+      "totalSales": "245,900",
+      "performanceErrors": "3",
+      "playthroughRate": "61%",
+      "updatedAt": "2026-06-25T20:00:00Z"
+    }
+  ]
+}
+```
