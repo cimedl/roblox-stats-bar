@@ -102,7 +102,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     private func appIcon(at url: URL) -> NSImage {
         let image = NSWorkspace.shared.icon(forFile: url.path)
         image.size = NSSize(width: 17, height: 17)
-        image.isTemplate = false
+        image.isTemplate = true
         return image
     }
 
