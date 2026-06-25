@@ -16,6 +16,7 @@ swiftc -O \
   Sources/RobloxStatsBar/CreatorHubScraper.swift \
   Sources/RobloxStatsBar/DashboardMetricsStore.swift \
   Sources/RobloxStatsBar/RobloxAPI.swift \
+  Sources/RobloxStatsBar/SafariCookieImporter.swift \
   Sources/RobloxStatsBar/main.swift \
   -o "${binary_dir}/RobloxStatsBar"
 
