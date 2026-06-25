@@ -24,11 +24,21 @@ The menu can display these metrics from a local cache:
 - Performance error count
 - Playthrough rate
 
-Use `Update Creator Hub Metrics...` to save values locally after checking Creator Hub. The cache lives at:
+On startup and refresh, the app attempts to fetch Creator Hub metrics from authenticated private dashboard endpoints when a local Roblox cookie is configured. Use `Update Creator Hub Metrics...` to fetch a selected game on demand or save values manually after checking Creator Hub.
+
+The cache lives at:
 
 ```text
 ~/.config/roblox-stats-bar/dashboard-metrics.json
 ```
+
+The optional local cookie file lives at:
+
+```text
+~/.config/roblox-stats-bar/roblox-cookie.txt
+```
+
+That file can contain either the raw cookie value or `.ROBLOSECURITY=<value>`. It is intentionally ignored by git.
 
 ## API boundary
 
@@ -38,4 +48,4 @@ Roblox's Open Cloud docs index says analytics/engagement data and revenue breakd
 https://create.roblox.com/docs/cloud/llms.txt
 ```
 
-The app therefore avoids committing or storing account cookies such as `.ROBLOSECURITY`, avoids checking in personal universe IDs, and keeps dashboard-backed values in a local ignored cache.
+The app therefore avoids committing account cookies such as `.ROBLOSECURITY`, avoids checking in personal universe IDs, and keeps dashboard-backed values in a local ignored cache. The authenticated fetcher is a private personal dashboard integration and may break if Roblox changes Creator Hub internals.

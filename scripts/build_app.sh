@@ -13,6 +13,7 @@ mkdir -p "${binary_dir}" "${macos_dir}"
 
 swiftc -O \
   Sources/RobloxStatsBar/AppConfig.swift \
+  Sources/RobloxStatsBar/CreatorHubScraper.swift \
   Sources/RobloxStatsBar/DashboardMetricsStore.swift \
   Sources/RobloxStatsBar/RobloxAPI.swift \
   Sources/RobloxStatsBar/main.swift \

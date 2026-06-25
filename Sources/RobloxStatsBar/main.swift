@@ -78,9 +78,11 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshNow), keyEquivalent: "r")
     private let manageItem = NSMenuItem(title: "Manage Games...", action: #selector(showManageWindow), keyEquivalent: ",")
     private let metricsItem = NSMenuItem(title: "Update Creator Hub Metrics...", action: #selector(showMetricsWindow), keyEquivalent: "m")
+    private let sessionItem = NSMenuItem(title: "Creator Hub Session...", action: #selector(showSessionWindow), keyEquivalent: "s")
     private let configStore = ConfigStore()
     private let dashboardMetricsStore = DashboardMetricsStore()
     private let api = RobloxAPI()
+    private lazy var creatorHubScraper = CreatorHubScraper(metricsStore: dashboardMetricsStore)
     private let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
@@ -111,12 +113,17 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     private var metricsGamePopup: NSPopUpButton?
     private var metricsFields: [CreatorMetricField: NSTextField] = [:]
     private var metricsStatusLabel: NSTextField?
+    private var sessionWindow: NSWindow?
+    private var sessionCookieField: NSSecureTextField?
+    private var sessionStatusLabel: NSTextField?
+    private var creatorHubFetchStatus: String?
     private var hasStatusIcon = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         refreshItem.target = self
         manageItem.target = self
         metricsItem.target = self
+        sessionItem.target = self
         config = configStore.load()
 
         configureStatusItem()
@@ -194,6 +201,11 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
 
             statusMenu.addItem(.separator())
             statusMenu.addItem(dashboardMetricsItem(snapshot.dashboardMetrics))
+            if let creatorHubFetchStatus {
+                let item = NSMenuItem(title: "Creator Hub fetch: \(creatorHubFetchStatus)", action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                statusMenu.addItem(item)
+            }
         } else {
             let loadingItem = NSMenuItem(title: trackedGames().isEmpty ? "Add games to start tracking" : "Loading Roblox stats...", action: nil, keyEquivalent: "")
             loadingItem.isEnabled = false
@@ -207,6 +219,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         statusMenu.addItem(manageItem)
         metricsItem.isEnabled = !config.games.isEmpty
         statusMenu.addItem(metricsItem)
+        statusMenu.addItem(sessionItem)
         statusMenu.addItem(.separator())
         statusMenu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
@@ -326,6 +339,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
                 self.mergeNames(from: snapshot.games)
                 self.setStatusText(self.compact(mergedSnapshot.totalCCU))
                 self.statusItem.button?.toolTip = "Roblox stats: \(self.compact(mergedSnapshot.totalCCU)) CCU across \(mergedSnapshot.games.count) games"
+                self.refreshCreatorHubMetrics(enabledIds: enabledIds)
             case .failure(let error):
                 self.setStatusText("--")
                 self.statusItem.button?.toolTip = error.localizedDescription
@@ -333,6 +347,38 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
 
             self.rebuildMenu()
             self.renderManageGames()
+        }
+    }
+
+    private func refreshCreatorHubMetrics(enabledIds: [Int64]) {
+        creatorHubScraper.refresh(universeIds: enabledIds) { [weak self] result in
+            guard let self else {
+                return
+            }
+
+            switch result {
+            case .success(let status):
+                if let skippedReason = status.skippedReason {
+                    self.creatorHubFetchStatus = skippedReason
+                } else {
+                    self.creatorHubFetchStatus = "Fetched \(status.fetchedCount) game\(status.fetchedCount == 1 ? "" : "s")"
+                }
+            case .failure(let error):
+                self.creatorHubFetchStatus = error.localizedDescription
+            }
+
+            guard let snapshot = self.snapshot else {
+                return
+            }
+
+            self.snapshot = RobloxStatsSnapshot(
+                capturedAt: snapshot.capturedAt,
+                games: snapshot.games,
+                dashboardMetrics: self.dashboardMetricsStore.metricStatuses(for: enabledIds)
+            )
+            self.rebuildMenu()
+            self.renderManageGames()
+            self.loadMetricsForSelectedGame()
         }
     }
 
@@ -497,6 +543,10 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         reloadButton.frame = NSRect(x: 112, y: 34, width: 82, height: 30)
         rootView.addSubview(reloadButton)
 
+        let fetchButton = NSButton(title: "Fetch", target: self, action: #selector(fetchSelectedMetrics))
+        fetchButton.frame = NSRect(x: 202, y: 34, width: 82, height: 30)
+        rootView.addSubview(fetchButton)
+
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSelectedMetrics))
         saveButton.keyEquivalent = "\r"
         saveButton.frame = NSRect(x: 386, y: 34, width: 82, height: 30)
@@ -538,12 +588,117 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         metricsStatusLabel?.stringValue = games.isEmpty ? "Add a game first." : ""
     }
 
+    @objc private func showSessionWindow() {
+        if sessionWindow == nil {
+            buildSessionWindow()
+        }
+
+        renderSessionWindow()
+        sessionWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func buildSessionWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 190),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Creator Hub Session"
+        window.center()
+
+        let rootView = NSView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 520, height: 190))
+        rootView.autoresizingMask = [.width, .height]
+
+        rootView.addSubview(label("Creator Hub Session", frame: NSRect(x: 22, y: 142, width: 300, height: 24), font: .systemFont(ofSize: 18, weight: .semibold), color: .labelColor))
+        rootView.addSubview(label("Cookie", frame: NSRect(x: 22, y: 104, width: 120, height: 16), font: .systemFont(ofSize: 11, weight: .medium), color: .secondaryLabelColor))
+
+        let field = NSSecureTextField(frame: NSRect(x: 22, y: 72, width: 454, height: 28))
+        field.placeholderString = ".ROBLOSECURITY"
+        rootView.addSubview(field)
+        sessionCookieField = field
+
+        let clearButton = NSButton(title: "Clear", target: self, action: #selector(clearCreatorHubSession))
+        clearButton.frame = NSRect(x: 22, y: 28, width: 82, height: 30)
+        rootView.addSubview(clearButton)
+
+        let saveButton = NSButton(title: "Save", target: self, action: #selector(saveCreatorHubSession))
+        saveButton.keyEquivalent = "\r"
+        saveButton.frame = NSRect(x: 394, y: 28, width: 82, height: 30)
+        rootView.addSubview(saveButton)
+
+        let status = label("", frame: NSRect(x: 116, y: 34, width: 266, height: 16), font: .systemFont(ofSize: 11), color: .secondaryLabelColor)
+        rootView.addSubview(status)
+        sessionStatusLabel = status
+
+        window.contentView = rootView
+        sessionWindow = window
+    }
+
+    private func renderSessionWindow() {
+        sessionCookieField?.stringValue = ""
+        sessionStatusLabel?.stringValue = creatorHubScraper.hasLocalCookie() ? "Session saved locally." : "No saved session."
+    }
+
+    @objc private func saveCreatorHubSession() {
+        do {
+            try creatorHubScraper.saveCookie(sessionCookieField?.stringValue ?? "")
+            sessionCookieField?.stringValue = ""
+            sessionStatusLabel?.stringValue = "Session saved locally."
+            creatorHubFetchStatus = "Session saved"
+            refresh()
+        } catch {
+            sessionStatusLabel?.stringValue = error.localizedDescription
+        }
+    }
+
+    @objc private func clearCreatorHubSession() {
+        do {
+            try creatorHubScraper.clearCookie()
+            sessionCookieField?.stringValue = ""
+            sessionStatusLabel?.stringValue = "Session cleared."
+            creatorHubFetchStatus = "No local Roblox cookie configured"
+            rebuildMenu()
+        } catch {
+            sessionStatusLabel?.stringValue = error.localizedDescription
+        }
+    }
+
     @objc private func metricsGameChanged() {
         loadMetricsForSelectedGame()
     }
 
     @objc private func reloadSelectedMetrics() {
         loadMetricsForSelectedGame()
+    }
+
+    @objc private func fetchSelectedMetrics() {
+        guard let universeId = selectedMetricsUniverseId() else {
+            metricsStatusLabel?.stringValue = "Add a game first."
+            return
+        }
+
+        metricsStatusLabel?.stringValue = "Fetching Creator Hub..."
+        creatorHubScraper.refresh(universeIds: [universeId]) { [weak self] result in
+            guard let self else {
+                return
+            }
+
+            switch result {
+            case .success(let status):
+                if let skippedReason = status.skippedReason {
+                    self.metricsStatusLabel?.stringValue = skippedReason
+                } else {
+                    self.metricsStatusLabel?.stringValue = "Fetched Creator Hub metrics."
+                }
+            case .failure(let error):
+                self.metricsStatusLabel?.stringValue = error.localizedDescription
+            }
+
+            self.loadMetricsForSelectedGame()
+            self.refresh()
+        }
     }
 
     private func loadMetricsForSelectedGame() {

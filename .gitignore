@@ -6,6 +6,8 @@ dist/
 
 # Local app config and credentials
 config.json
+dashboard-metrics.json
+roblox-cookie.txt
 .env
 .env.*
 *.key
