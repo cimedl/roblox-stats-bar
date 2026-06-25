@@ -81,19 +81,17 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
 
         let transform = NSAffineTransform()
         transform.translateX(by: size.width / 2, yBy: size.height / 2)
-        transform.rotate(byDegrees: -15)
+        transform.rotate(byDegrees: -18)
         transform.translateX(by: -size.width / 2, yBy: -size.height / 2)
         transform.concat()
 
-        NSColor.black.setFill()
-        let outer = NSBezierPath(roundedRect: NSRect(x: 3.1, y: 3.1, width: 11.8, height: 11.8), xRadius: 2, yRadius: 2)
-        outer.fill()
+        let iconPath = NSBezierPath()
+        iconPath.append(NSBezierPath(rect: NSRect(x: 2.2, y: 2.2, width: 13.6, height: 13.6)))
+        iconPath.append(NSBezierPath(rect: NSRect(x: 6.6, y: 6.6, width: 4.8, height: 4.8)))
+        iconPath.windingRule = .evenOdd
 
-        let inner = NSBezierPath(roundedRect: NSRect(x: 7.1, y: 7.1, width: 3.8, height: 3.8), xRadius: 0.6, yRadius: 0.6)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current?.compositingOperation = .clear
-        inner.fill()
-        NSGraphicsContext.restoreGraphicsState()
+        NSColor.black.setFill()
+        iconPath.fill()
 
         image.unlockFocus()
         image.isTemplate = true
