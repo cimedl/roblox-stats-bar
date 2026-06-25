@@ -38,6 +38,27 @@ final class DashboardMetricsStore {
         ]
     }
 
+    func record(for universeId: Int64) -> DashboardMetricsRecord? {
+        loadAllRecords().first { $0.universeId == universeId }
+    }
+
+    func save(_ record: DashboardMetricsRecord) throws {
+        var records = loadAllRecords()
+
+        if let index = records.firstIndex(where: { $0.universeId == record.universeId }) {
+            records[index] = record
+        } else {
+            records.append(record)
+        }
+
+        try saveAllRecords(records)
+    }
+
+    func deleteRecord(for universeId: Int64) throws {
+        let records = loadAllRecords().filter { $0.universeId != universeId }
+        try saveAllRecords(records)
+    }
+
     static func waitingStatuses() -> [MetricSourceStatus] {
         metricTitles.map {
             MetricSourceStatus(title: $0, status: "Waiting", source: "Config", detail: "Add games first")
@@ -45,6 +66,11 @@ final class DashboardMetricsStore {
     }
 
     private func loadRecords(for universeIds: [Int64]) -> [DashboardMetricsRecord] {
+        let selectedIds = Set(universeIds)
+        return loadAllRecords().filter { selectedIds.contains($0.universeId) }
+    }
+
+    private func loadAllRecords() -> [DashboardMetricsRecord] {
         guard FileManager.default.fileExists(atPath: metricsURL.path),
               let data = try? Data(contentsOf: metricsURL) else {
             return []
@@ -57,8 +83,20 @@ final class DashboardMetricsStore {
             return []
         }
 
-        let selectedIds = Set(universeIds)
-        return file.metrics.filter { selectedIds.contains($0.universeId) }
+        return file.metrics
+    }
+
+    private func saveAllRecords(_ records: [DashboardMetricsRecord]) throws {
+        let directory = metricsURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+
+        let sortedRecords = records.sorted { $0.universeId < $1.universeId }
+        let data = try encoder.encode(DashboardMetricsFile(metrics: sortedRecords))
+        try data.write(to: metricsURL, options: [.atomic])
     }
 
     private func status(

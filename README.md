@@ -14,7 +14,7 @@ These currently come from Roblox public game endpoints and do not require storin
 
 ## Creator Hub metrics
 
-The app reserves menu rows for the requested dashboard-backed metrics:
+The app has menu rows for the requested dashboard-backed metrics:
 
 - D1 retention
 - D7 retention
@@ -23,7 +23,11 @@ The app reserves menu rows for the requested dashboard-backed metrics:
 - Performance error count
 - Playthrough rate
 
-Those rows are marked `Pending` until a stable authenticated Creator Hub source is added. The repo should not contain personal game IDs, account cookies, `.ROBLOSECURITY`, or local config.
+Use **Update Creator Hub Metrics...** from the menu bar to save values from Creator Hub into the local dashboard metric cache. The app can also open the selected game's Creator Hub page from that window.
+
+Roblox's current Open Cloud docs say analytics/engagement and revenue breakdown data are not exposed through a supported REST API, so the app does not store `.ROBLOSECURITY` cookies or scrape private dashboard endpoints. See [docs/data-sources.md](docs/data-sources.md).
+
+The repo should not contain personal game IDs, account cookies, `.ROBLOSECURITY`, or local config.
 
 ## Build and Run
 

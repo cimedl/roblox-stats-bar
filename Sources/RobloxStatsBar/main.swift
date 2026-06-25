@@ -1,11 +1,83 @@
 import AppKit
 import Foundation
 
+private enum CreatorMetricField: CaseIterable {
+    case d1Retention
+    case d7Retention
+    case robuxSales72h
+    case totalSales
+    case performanceErrors
+    case playthroughRate
+
+    var title: String {
+        switch self {
+        case .d1Retention:
+            return "D1 retention"
+        case .d7Retention:
+            return "D7 retention"
+        case .robuxSales72h:
+            return "72h Robux sales"
+        case .totalSales:
+            return "Total sales"
+        case .performanceErrors:
+            return "Performance errors"
+        case .playthroughRate:
+            return "Playthrough rate"
+        }
+    }
+
+    var placeholder: String {
+        switch self {
+        case .d1Retention, .d7Retention, .playthroughRate:
+            return "18.4%"
+        case .robuxSales72h, .totalSales:
+            return "12,340"
+        case .performanceErrors:
+            return "3"
+        }
+    }
+
+    func value(from record: DashboardMetricsRecord) -> String {
+        switch self {
+        case .d1Retention:
+            return record.d1Retention ?? ""
+        case .d7Retention:
+            return record.d7Retention ?? ""
+        case .robuxSales72h:
+            return record.robuxSales72h ?? ""
+        case .totalSales:
+            return record.totalSales ?? ""
+        case .performanceErrors:
+            return record.performanceErrors ?? ""
+        case .playthroughRate:
+            return record.playthroughRate ?? ""
+        }
+    }
+
+    func apply(_ value: String?, to record: inout DashboardMetricsRecord) {
+        switch self {
+        case .d1Retention:
+            record.d1Retention = value
+        case .d7Retention:
+            record.d7Retention = value
+        case .robuxSales72h:
+            record.robuxSales72h = value
+        case .totalSales:
+            record.totalSales = value
+        case .performanceErrors:
+            record.performanceErrors = value
+        case .playthroughRate:
+            record.playthroughRate = value
+        }
+    }
+}
+
 final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusMenu = NSMenu()
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshNow), keyEquivalent: "r")
     private let manageItem = NSMenuItem(title: "Manage Games...", action: #selector(showManageWindow), keyEquivalent: ",")
+    private let metricsItem = NSMenuItem(title: "Update Creator Hub Metrics...", action: #selector(showMetricsWindow), keyEquivalent: "m")
     private let configStore = ConfigStore()
     private let dashboardMetricsStore = DashboardMetricsStore()
     private let api = RobloxAPI()
@@ -35,11 +107,16 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
     private var gamesStackView: NSStackView?
     private var inputField: NSTextField?
     private var statusLabel: NSTextField?
+    private var metricsWindow: NSWindow?
+    private var metricsGamePopup: NSPopUpButton?
+    private var metricsFields: [CreatorMetricField: NSTextField] = [:]
+    private var metricsStatusLabel: NSTextField?
     private var hasStatusIcon = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         refreshItem.target = self
         manageItem.target = self
+        metricsItem.target = self
         config = configStore.load()
 
         configureStatusItem()
@@ -128,6 +205,8 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         statusMenu.addItem(.separator())
         statusMenu.addItem(refreshItem)
         statusMenu.addItem(manageItem)
+        metricsItem.isEnabled = !config.games.isEmpty
+        statusMenu.addItem(metricsItem)
         statusMenu.addItem(.separator())
         statusMenu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
@@ -357,6 +436,205 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         for game in config.games.sorted(by: { $0.addedAt < $1.addedAt }) {
             stack.addArrangedSubview(gameManageRow(game))
         }
+    }
+
+    @objc private func showMetricsWindow() {
+        config = configStore.load()
+
+        if metricsWindow == nil {
+            buildMetricsWindow()
+        }
+
+        renderMetricsGames()
+        loadMetricsForSelectedGame()
+        metricsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func buildMetricsWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 430),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Creator Hub Metrics"
+        window.center()
+
+        let rootView = NSView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 520, height: 430))
+        rootView.autoresizingMask = [.width, .height]
+
+        rootView.addSubview(label("Creator Hub Metrics", frame: NSRect(x: 22, y: 382, width: 300, height: 24), font: .systemFont(ofSize: 18, weight: .semibold), color: .labelColor))
+        rootView.addSubview(label("Game", frame: NSRect(x: 22, y: 340, width: 120, height: 16), font: .systemFont(ofSize: 11, weight: .medium), color: .secondaryLabelColor))
+
+        let popup = NSPopUpButton(frame: NSRect(x: 22, y: 310, width: 310, height: 28), pullsDown: false)
+        popup.target = self
+        popup.action = #selector(metricsGameChanged)
+        rootView.addSubview(popup)
+        metricsGamePopup = popup
+
+        let openButton = NSButton(title: "Open Hub", target: self, action: #selector(openSelectedCreatorHub))
+        openButton.frame = NSRect(x: 344, y: 309, width: 104, height: 30)
+        rootView.addSubview(openButton)
+
+        metricsFields.removeAll()
+        let startY: CGFloat = 262
+        for (index, metric) in CreatorMetricField.allCases.enumerated() {
+            let y = startY - CGFloat(index) * 40
+            rootView.addSubview(label(metric.title, frame: NSRect(x: 22, y: y + 6, width: 140, height: 16), font: .systemFont(ofSize: 12, weight: .medium), color: .labelColor))
+
+            let field = NSTextField(frame: NSRect(x: 174, y: y, width: 180, height: 26))
+            field.placeholderString = metric.placeholder
+            rootView.addSubview(field)
+            metricsFields[metric] = field
+        }
+
+        let clearButton = NSButton(title: "Clear", target: self, action: #selector(clearSelectedMetrics))
+        clearButton.frame = NSRect(x: 22, y: 34, width: 82, height: 30)
+        rootView.addSubview(clearButton)
+
+        let reloadButton = NSButton(title: "Reload", target: self, action: #selector(reloadSelectedMetrics))
+        reloadButton.frame = NSRect(x: 112, y: 34, width: 82, height: 30)
+        rootView.addSubview(reloadButton)
+
+        let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSelectedMetrics))
+        saveButton.keyEquivalent = "\r"
+        saveButton.frame = NSRect(x: 386, y: 34, width: 82, height: 30)
+        rootView.addSubview(saveButton)
+
+        let status = label("", frame: NSRect(x: 22, y: 12, width: 446, height: 16), font: .systemFont(ofSize: 11), color: .secondaryLabelColor)
+        rootView.addSubview(status)
+        metricsStatusLabel = status
+
+        window.contentView = rootView
+        metricsWindow = window
+    }
+
+    private func renderMetricsGames() {
+        guard let popup = metricsGamePopup else {
+            return
+        }
+
+        let selectedId = selectedMetricsUniverseId()
+        popup.removeAllItems()
+
+        let games = config.games.sorted { lhs, rhs in
+            (lhs.displayName ?? "\(lhs.universeId)") < (rhs.displayName ?? "\(rhs.universeId)")
+        }
+
+        for game in games {
+            let title = game.displayName ?? "Universe \(game.universeId)"
+            popup.addItem(withTitle: title)
+            popup.lastItem?.representedObject = NSNumber(value: game.universeId)
+        }
+
+        if let selectedId,
+           let item = popup.itemArray.first(where: { ($0.representedObject as? NSNumber)?.int64Value == selectedId }) {
+            popup.select(item)
+        } else if !games.isEmpty {
+            popup.selectItem(at: 0)
+        }
+
+        metricsStatusLabel?.stringValue = games.isEmpty ? "Add a game first." : ""
+    }
+
+    @objc private func metricsGameChanged() {
+        loadMetricsForSelectedGame()
+    }
+
+    @objc private func reloadSelectedMetrics() {
+        loadMetricsForSelectedGame()
+    }
+
+    private func loadMetricsForSelectedGame() {
+        guard let universeId = selectedMetricsUniverseId() else {
+            CreatorMetricField.allCases.forEach { metricsFields[$0]?.stringValue = "" }
+            metricsStatusLabel?.stringValue = "Add a game first."
+            return
+        }
+
+        if let record = dashboardMetricsStore.record(for: universeId) {
+            for metric in CreatorMetricField.allCases {
+                metricsFields[metric]?.stringValue = metric.value(from: record)
+            }
+            metricsStatusLabel?.stringValue = updatedMetricsText(record.updatedAt)
+        } else {
+            CreatorMetricField.allCases.forEach { metricsFields[$0]?.stringValue = "" }
+            metricsStatusLabel?.stringValue = "No cached Creator Hub metrics for this game."
+        }
+    }
+
+    @objc private func saveSelectedMetrics() {
+        guard let universeId = selectedMetricsUniverseId() else {
+            metricsStatusLabel?.stringValue = "Add a game first."
+            return
+        }
+
+        var record = DashboardMetricsRecord(
+            universeId: universeId,
+            d1Retention: nil,
+            d7Retention: nil,
+            robuxSales72h: nil,
+            totalSales: nil,
+            performanceErrors: nil,
+            playthroughRate: nil,
+            updatedAt: Date()
+        )
+
+        for metric in CreatorMetricField.allCases {
+            metric.apply(trimmedMetricValue(metricsFields[metric]?.stringValue ?? ""), to: &record)
+        }
+
+        do {
+            try dashboardMetricsStore.save(record)
+            metricsStatusLabel?.stringValue = "Saved local Creator Hub metrics."
+            refresh()
+        } catch {
+            metricsStatusLabel?.stringValue = "Could not save metrics: \(error.localizedDescription)"
+        }
+    }
+
+    @objc private func clearSelectedMetrics() {
+        guard let universeId = selectedMetricsUniverseId() else {
+            metricsStatusLabel?.stringValue = "Add a game first."
+            return
+        }
+
+        do {
+            try dashboardMetricsStore.deleteRecord(for: universeId)
+            CreatorMetricField.allCases.forEach { metricsFields[$0]?.stringValue = "" }
+            metricsStatusLabel?.stringValue = "Cleared local Creator Hub metrics."
+            refresh()
+        } catch {
+            metricsStatusLabel?.stringValue = "Could not clear metrics: \(error.localizedDescription)"
+        }
+    }
+
+    @objc private func openSelectedCreatorHub() {
+        guard let universeId = selectedMetricsUniverseId(),
+              let url = URL(string: "https://create.roblox.com/dashboard/creations/experiences/\(universeId)/overview") else {
+            metricsStatusLabel?.stringValue = "Add a game first."
+            return
+        }
+
+        NSWorkspace.shared.open(url)
+    }
+
+    private func selectedMetricsUniverseId() -> Int64? {
+        (metricsGamePopup?.selectedItem?.representedObject as? NSNumber)?.int64Value
+    }
+
+    private func trimmedMetricValue(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func updatedMetricsText(_ updatedAt: Date?) -> String {
+        guard let updatedAt else {
+            return "Loaded local Creator Hub metrics."
+        }
+
+        return "Loaded local metrics from \(dateFormatter.string(from: updatedAt))."
     }
 
     private func gameManageRow(_ game: TrackedGame) -> NSView {
