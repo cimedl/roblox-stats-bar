@@ -36,4 +36,4 @@ Config is stored locally:
 ~/.config/roblox-stats-bar/config.json
 ```
 
-Use **Manage Games...** from the menu bar to add universe IDs or Roblox game URLs.
+Use **Manage Games...** from the menu bar to add universe IDs, Roblox game URLs, or Creator Hub experience URLs.

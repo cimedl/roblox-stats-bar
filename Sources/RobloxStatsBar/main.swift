@@ -175,6 +175,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
             return
         }
 
+        config = configStore.load()
         let enabledIds = trackedGames().map(\.universeId)
         if enabledIds.isEmpty {
             snapshot = RobloxStatsSnapshot(capturedAt: Date(), games: [], unavailableMetrics: [

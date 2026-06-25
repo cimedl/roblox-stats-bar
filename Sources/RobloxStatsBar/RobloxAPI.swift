@@ -210,6 +210,13 @@ final class RobloxAPI {
                 .split(separator: "/")
                 .map(String.init)
 
+            if let experiencesIndex = pathParts.firstIndex(where: { $0.lowercased() == "experiences" }),
+               pathParts.indices.contains(experiencesIndex + 1),
+               let universeId = Int64(pathParts[experiencesIndex + 1]),
+               universeId > 0 {
+                return .universeId(universeId)
+            }
+
             if let gamesIndex = pathParts.firstIndex(where: { $0.lowercased() == "games" }),
                pathParts.indices.contains(gamesIndex + 1),
                let placeId = Int64(pathParts[gamesIndex + 1]),
