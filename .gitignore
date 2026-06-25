@@ -1,0 +1,19 @@
+.DS_Store
+.build/
+dist/
+*.log
+*.tmp
+
+# Local app config and credentials
+config.json
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.mobileprovision
+
+# Roblox/GitHub secrets should never be committed.
+*ROBLOSECURITY*
+*GITHUB_TOKEN*
+*GH_TOKEN*
