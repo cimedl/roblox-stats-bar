@@ -60,48 +60,42 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        if let image = robloxStudioIcon() {
-            button.image = image
-            button.imagePosition = .imageLeading
-            button.imageScaling = .scaleProportionallyDown
-            hasStatusIcon = true
-        }
+        button.image = robloxTemplateIcon()
+        button.imagePosition = .imageLeading
+        button.imageScaling = .scaleProportionallyDown
+        hasStatusIcon = true
 
         setStatusText("--")
         button.toolTip = "Roblox stats"
         statusItem.menu = statusMenu
     }
 
-    private func robloxStudioIcon() -> NSImage? {
-        let workspace = NSWorkspace.shared
-        let bundleIdentifiers = [
-            "com.roblox.RobloxStudio",
-            "com.Roblox.RobloxStudio",
-        ]
+    private func robloxTemplateIcon() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size)
 
-        for bundleIdentifier in bundleIdentifiers {
-            if let url = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier) {
-                return appIcon(at: url)
-            }
-        }
+        image.lockFocus()
 
-        let candidatePaths = [
-            "/Applications/RobloxStudio.app",
-            "/Applications/Roblox Studio.app",
-            "\(NSHomeDirectory())/Applications/RobloxStudio.app",
-            "\(NSHomeDirectory())/Applications/Roblox Studio.app",
-        ]
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: size).fill()
 
-        for path in candidatePaths where FileManager.default.fileExists(atPath: path) {
-            return appIcon(at: URL(fileURLWithPath: path))
-        }
+        let transform = NSAffineTransform()
+        transform.translateX(by: size.width / 2, yBy: size.height / 2)
+        transform.rotate(byDegrees: -15)
+        transform.translateX(by: -size.width / 2, yBy: -size.height / 2)
+        transform.concat()
 
-        return nil
-    }
+        NSColor.black.setFill()
+        let outer = NSBezierPath(roundedRect: NSRect(x: 3.1, y: 3.1, width: 11.8, height: 11.8), xRadius: 2, yRadius: 2)
+        outer.fill()
 
-    private func appIcon(at url: URL) -> NSImage {
-        let image = NSWorkspace.shared.icon(forFile: url.path)
-        image.size = NSSize(width: 17, height: 17)
+        let inner = NSBezierPath(roundedRect: NSRect(x: 7.1, y: 7.1, width: 3.8, height: 3.8), xRadius: 0.6, yRadius: 0.6)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.compositingOperation = .clear
+        inner.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        image.unlockFocus()
         image.isTemplate = true
         return image
     }
