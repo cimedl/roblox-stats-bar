@@ -22,7 +22,7 @@ struct RobloxCreator: Decodable {
 struct RobloxStatsSnapshot {
     let capturedAt: Date
     let games: [RobloxGameStat]
-    let unavailableMetrics: [UnavailableMetric]
+    let dashboardMetrics: [MetricSourceStatus]
 
     var totalCCU: Int {
         games.reduce(0) { $0 + ($1.playing ?? 0) }
@@ -37,9 +37,11 @@ struct RobloxStatsSnapshot {
     }
 }
 
-struct UnavailableMetric {
+struct MetricSourceStatus {
     let title: String
-    let reason: String
+    let status: String
+    let source: String
+    let detail: String
 }
 
 enum RobloxAPIError: LocalizedError {
@@ -75,7 +77,7 @@ final class RobloxAPI {
             completion(.success(RobloxStatsSnapshot(
                 capturedAt: Date(),
                 games: [],
-                unavailableMetrics: RobloxAPI.dashboardOnlyMetrics()
+                dashboardMetrics: RobloxAPI.dashboardMetricStatuses()
             )))
             return
         }
@@ -116,7 +118,7 @@ final class RobloxAPI {
             completion(.success(RobloxStatsSnapshot(
                 capturedAt: Date(),
                 games: sortedGames,
-                unavailableMetrics: RobloxAPI.dashboardOnlyMetrics()
+                dashboardMetrics: RobloxAPI.dashboardMetricStatuses()
             )))
         }
     }
@@ -233,14 +235,14 @@ final class RobloxAPI {
         return nil
     }
 
-    private static func dashboardOnlyMetrics() -> [UnavailableMetric] {
+    private static func dashboardMetricStatuses() -> [MetricSourceStatus] {
         [
-            UnavailableMetric(title: "D1 retention", reason: "Creator Hub analytics source needed"),
-            UnavailableMetric(title: "D7 retention", reason: "Creator Hub analytics source needed"),
-            UnavailableMetric(title: "72h Robux sales", reason: "Creator Hub or authenticated economy source needed"),
-            UnavailableMetric(title: "Total sales", reason: "Creator Hub or authenticated economy source needed"),
-            UnavailableMetric(title: "Performance errors", reason: "Creator Hub performance source needed"),
-            UnavailableMetric(title: "Playthrough rate", reason: "Custom funnel or Creator Hub source needed"),
+            MetricSourceStatus(title: "D1 retention", status: "Pending", source: "Creator Hub", detail: "Analytics source needed"),
+            MetricSourceStatus(title: "D7 retention", status: "Pending", source: "Creator Hub", detail: "Analytics source needed"),
+            MetricSourceStatus(title: "72h Robux sales", status: "Pending", source: "Creator Hub", detail: "Authenticated economy source needed"),
+            MetricSourceStatus(title: "Total sales", status: "Pending", source: "Creator Hub", detail: "Authenticated economy source needed"),
+            MetricSourceStatus(title: "Performance errors", status: "Pending", source: "Creator Hub", detail: "Performance source needed"),
+            MetricSourceStatus(title: "Playthrough rate", status: "Pending", source: "Creator Hub/custom", detail: "Funnel source needed"),
         ]
     }
 }

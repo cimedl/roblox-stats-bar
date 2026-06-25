@@ -1,8 +1,8 @@
 # Roblox Stats Bar
 
-Local macOS menu-bar app for tracking public Roblox game stats.
+Local macOS menu-bar app for tracking Roblox game stats.
 
-## Current metrics
+## Live metrics
 
 - Aggregate current CCU across enabled games
 - Per-game CCU
@@ -10,7 +10,11 @@ Local macOS menu-bar app for tracking public Roblox game stats.
 - Per-game favorites
 - Game name, universe ID, and root place ID
 
-The app also shows the requested dashboard-only metrics as pending source items:
+These currently come from Roblox public game endpoints and do not require storing Roblox account cookies.
+
+## Creator Hub metrics
+
+The app reserves menu rows for the requested dashboard-backed metrics:
 
 - D1 retention
 - D7 retention
@@ -19,7 +23,7 @@ The app also shows the requested dashboard-only metrics as pending source items:
 - Performance error count
 - Playthrough rate
 
-Those are not pulled in this MVP because the reliable public Roblox endpoints do not expose them. A later Creator Hub connector can plug into the same menu once a stable authenticated source is chosen.
+Those rows are marked `Pending` until a stable authenticated Creator Hub source is added. The repo should not contain personal game IDs, account cookies, `.ROBLOSECURITY`, or local config.
 
 ## Build and Run
 

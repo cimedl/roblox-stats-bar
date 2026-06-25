@@ -81,7 +81,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
             }
 
             statusMenu.addItem(.separator())
-            statusMenu.addItem(unavailableMetricsItem(snapshot.unavailableMetrics))
+            statusMenu.addItem(dashboardMetricsItem(snapshot.dashboardMetrics))
         } else {
             let loadingItem = NSMenuItem(title: trackedGames().isEmpty ? "Add games to start tracking" : "Loading Roblox stats...", action: nil, keyEquivalent: "")
             loadingItem.isEnabled = false
@@ -105,7 +105,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         addMetric(title: "Favorites", value: compact(snapshot.totalFavorites), x: 246, y: 84, to: view)
 
         addMetric(title: "Tracked games", value: "\(snapshot.games.count)", x: 14, y: 34, to: view)
-        addMetric(title: "Dashboard stats", value: "Pending", x: 130, y: 34, to: view)
+        addMetric(title: "Dashboard stats", value: "\(snapshot.dashboardMetrics.count) pending", x: 130, y: 34, to: view)
         addMetric(title: "Updated", value: dateFormatter.string(from: snapshot.capturedAt), x: 246, y: 34, to: view)
 
         return viewMenuItem(view)
@@ -125,15 +125,17 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         return viewMenuItem(view)
     }
 
-    private func unavailableMetricsItem(_ metrics: [UnavailableMetric]) -> NSMenuItem {
-        let rowHeight: CGFloat = 30
+    private func dashboardMetricsItem(_ metrics: [MetricSourceStatus]) -> NSMenuItem {
+        let rowHeight: CGFloat = 34
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: CGFloat(metrics.count) * rowHeight + 18))
         view.addSubview(label("Creator Hub metrics", frame: NSRect(x: 14, y: view.frame.height - 20, width: 332, height: 16), font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor))
 
         for (index, metric) in metrics.enumerated() {
-            let y = view.frame.height - 48 - CGFloat(index) * rowHeight
-            view.addSubview(label(metric.title, frame: NSRect(x: 14, y: y + 10, width: 126, height: 16), font: .systemFont(ofSize: 11, weight: .medium), color: .labelColor))
-            view.addSubview(label(metric.reason, frame: NSRect(x: 144, y: y + 10, width: 202, height: 16), font: .systemFont(ofSize: 10), color: .secondaryLabelColor))
+            let y = view.frame.height - 52 - CGFloat(index) * rowHeight
+            view.addSubview(label(metric.title, frame: NSRect(x: 14, y: y + 14, width: 122, height: 16), font: .systemFont(ofSize: 11, weight: .medium), color: .labelColor))
+            view.addSubview(label(metric.status, frame: NSRect(x: 140, y: y + 14, width: 62, height: 16), font: .systemFont(ofSize: 10, weight: .semibold), color: .secondaryLabelColor))
+            view.addSubview(label(metric.source, frame: NSRect(x: 206, y: y + 14, width: 140, height: 16), font: .systemFont(ofSize: 10), color: .secondaryLabelColor))
+            view.addSubview(label(metric.detail, frame: NSRect(x: 14, y: y, width: 332, height: 14), font: .systemFont(ofSize: 10), color: .tertiaryLabelColor))
         }
 
         return viewMenuItem(view)
@@ -178,13 +180,13 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         config = configStore.load()
         let enabledIds = trackedGames().map(\.universeId)
         if enabledIds.isEmpty {
-            snapshot = RobloxStatsSnapshot(capturedAt: Date(), games: [], unavailableMetrics: [
-                UnavailableMetric(title: "D1 retention", reason: "Add games first"),
-                UnavailableMetric(title: "D7 retention", reason: "Add games first"),
-                UnavailableMetric(title: "72h Robux sales", reason: "Add games first"),
-                UnavailableMetric(title: "Total sales", reason: "Add games first"),
-                UnavailableMetric(title: "Performance errors", reason: "Add games first"),
-                UnavailableMetric(title: "Playthrough rate", reason: "Add games first"),
+            snapshot = RobloxStatsSnapshot(capturedAt: Date(), games: [], dashboardMetrics: [
+                MetricSourceStatus(title: "D1 retention", status: "Waiting", source: "Config", detail: "Add games first"),
+                MetricSourceStatus(title: "D7 retention", status: "Waiting", source: "Config", detail: "Add games first"),
+                MetricSourceStatus(title: "72h Robux sales", status: "Waiting", source: "Config", detail: "Add games first"),
+                MetricSourceStatus(title: "Total sales", status: "Waiting", source: "Config", detail: "Add games first"),
+                MetricSourceStatus(title: "Performance errors", status: "Waiting", source: "Config", detail: "Add games first"),
+                MetricSourceStatus(title: "Playthrough rate", status: "Waiting", source: "Config", detail: "Add games first"),
             ])
             setStatusText("RBX --")
             rebuildMenu()

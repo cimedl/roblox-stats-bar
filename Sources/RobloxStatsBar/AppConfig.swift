@@ -42,7 +42,9 @@ final class ConfigStore {
 
         do {
             let data = try Data(contentsOf: configURL)
-            return try JSONDecoder().decode(AppConfig.self, from: data)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(AppConfig.self, from: data)
         } catch {
             return AppConfig()
         }
