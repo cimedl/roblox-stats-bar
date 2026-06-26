@@ -23,7 +23,7 @@ The app has menu rows for the requested dashboard-backed metrics:
 - Performance error count
 - Playthrough rate
 
-On startup and refresh, the app attempts a local-only Creator Hub fetch from the active Chrome Roblox session. Use **Update Creator Hub Metrics...** from the menu bar to fetch a selected game on demand, open the selected game's Creator Hub page, or manually save fallback values into the local dashboard metric cache.
+On startup and refresh, the app attempts a local-only Creator Hub fetch from the active Chrome Roblox session. Use **Analytics** from the menu bar dropdown to view cached dashboard metrics and trend graphs.
 
 Roblox's current Open Cloud docs say analytics/engagement and revenue breakdown data are not exposed through a supported REST API, so the authenticated Creator Hub fetch uses private dashboard endpoints and a local ignored cookie file. See [docs/data-sources.md](docs/data-sources.md).
 
@@ -60,20 +60,28 @@ Optional authenticated Creator Hub cookie fallback:
 
 The app first attempts to read Chrome's encrypted local Roblox session. The cookie file can contain either the raw cookie value or `.ROBLOSECURITY=<value>` as a fallback. It is local-only and ignored by git.
 
-Example shape:
+Dummy example shape:
 
 ```json
 {
   "metrics": [
     {
-      "universeId": 1234567890,
-      "d1Retention": "18.4%",
-      "d7Retention": "4.9%",
-      "robuxSales72h": "12,340",
-      "totalSales": "245,900",
-      "performanceErrors": "3",
-      "playthroughRate": "61%",
-      "updatedAt": "2026-06-25T20:00:00Z"
+      "universeId": 0,
+      "d1Retention": "12.3%",
+      "d7Retention": "3.4%",
+      "robuxSales72h": "123",
+      "totalSales": "1,234",
+      "performanceErrors": "0",
+      "playthroughRate": "2.5%",
+      "metricSeries": {
+        "playthroughRate": [
+          {
+            "timestamp": "2024-01-01T00:00:00.000Z",
+            "value": 0.025
+          }
+        ]
+      },
+      "updatedAt": "2024-01-01T01:00:00Z"
     }
   ]
 }

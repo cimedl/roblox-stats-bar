@@ -24,7 +24,8 @@ The menu can display these metrics from a local cache:
 - Performance error count
 - Playthrough rate
 
-On startup and refresh, the app attempts to fetch Creator Hub metrics from authenticated private dashboard endpoints by reading the active Chrome Roblox session. Use `Update Creator Hub Metrics...` to fetch a selected game on demand or save values manually after checking Creator Hub.
+On startup and refresh, the app attempts to fetch Creator Hub metrics from authenticated private dashboard endpoints by reading the active Chrome Roblox session. It caches both display values and raw daily series for the Analytics menu graphs.
+Playthrough rate uses Creator Hub's acquisition PTR metric, with a fallback to the broader acquisition conversion rate if the qualified PTR metric is unavailable.
 
 The cache lives at:
 

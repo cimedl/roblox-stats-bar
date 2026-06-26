@@ -118,29 +118,35 @@ final class CreatorHubScraper {
         let end = Date()
         let start72Hours = calendar.date(byAdding: .hour, value: -72, to: end) ?? end
         let start30Days = calendar.date(byAdding: .day, value: -30, to: end) ?? end
+        let start60Days = calendar.date(byAdding: .day, value: -60, to: end) ?? end
         let start365Days = calendar.date(byAdding: .day, value: -365, to: end) ?? end
 
         let group = DispatchGroup()
         let lock = NSLock()
-        var values: [CreatorHubMetricSlot: Double] = [:]
+        var values: [DashboardMetricKey: Double] = [:]
+        var metricSeries: [DashboardMetricKey: [DashboardMetricPoint]] = [:]
         var sawSuccessfulMetric = false
         var firstError: Error?
 
         for request in [
-            MetricRequest(slot: .robuxSales72h, metric: .dailyRevenue, startTime: start72Hours, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
-            MetricRequest(slot: .totalSales, metric: .dailyRevenue, startTime: start365Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
-            MetricRequest(slot: .d1Retention, metric: .d1Retention, startTime: start30Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .latest),
-            MetricRequest(slot: .d7Retention, metric: .d7Retention, startTime: start30Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .latest),
-            MetricRequest(slot: .performanceErrors, metric: .performanceErrors, startTime: start72Hours, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
+            MetricRequest(key: .robuxSales72h, metric: .dailyRevenue, startTime: start72Hours, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
+            MetricRequest(key: .totalSales, metric: .dailyRevenue, startTime: start365Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
+            MetricRequest(key: .d1Retention, metric: .d1Retention, startTime: start30Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .latest),
+            MetricRequest(key: .d7Retention, metric: .d7Retention, startTime: start30Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .latest),
+            MetricRequest(key: .performanceErrors, metric: .performanceErrors, startTime: start72Hours, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
+            MetricRequest(key: .playthroughRate, metric: .qualifiedPlaythroughRate, fallbackMetrics: [.playthroughRate], startTime: start60Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .latest),
         ] {
             group.enter()
             queryMetric(request, universeId: universeId, cookie: cookie) { result in
                 lock.lock()
                 switch result {
-                case .success(let value):
+                case .success(let metricResult):
                     sawSuccessfulMetric = true
-                    if let value {
-                        values[request.slot] = value
+                    if let value = metricResult.value {
+                        values[request.key] = value
+                    }
+                    if !metricResult.series.isEmpty {
+                        metricSeries[request.key] = metricResult.series
                     }
                 case .failure(let error):
                     if firstError == nil {
@@ -155,7 +161,7 @@ final class CreatorHubScraper {
         group.notify(queue: .main) {
             if sawSuccessfulMetric, !values.isEmpty {
                 let existing = self.metricsStore.record(for: universeId)
-                completion(.success(DashboardMetricsRecord(
+                var record = DashboardMetricsRecord(
                     universeId: universeId,
                     d1Retention: self.percentText(values[.d1Retention]) ?? existing?.d1Retention,
                     d7Retention: self.percentText(values[.d7Retention]) ?? existing?.d7Retention,
@@ -163,8 +169,15 @@ final class CreatorHubScraper {
                     totalSales: self.robuxText(values[.totalSales]) ?? existing?.totalSales,
                     performanceErrors: self.integerText(values[.performanceErrors]) ?? existing?.performanceErrors,
                     playthroughRate: self.percentText(values[.playthroughRate]) ?? existing?.playthroughRate,
+                    metricSeries: existing?.metricSeries,
                     updatedAt: Date()
-                )))
+                )
+
+                for (key, series) in metricSeries {
+                    record.setSeries(series, for: key)
+                }
+
+                completion(.success(record))
             } else if let firstError {
                 completion(.failure(firstError))
             } else {
@@ -173,7 +186,22 @@ final class CreatorHubScraper {
         }
     }
 
-    private func queryMetric(_ metricRequest: MetricRequest, universeId: Int64, cookie: String, completion: @escaping (Result<Double?, Error>) -> Void) {
+    private func queryMetric(_ metricRequest: MetricRequest, universeId: Int64, cookie: String, completion: @escaping (Result<MetricFetchResult, Error>) -> Void) {
+        queryMetricCandidates(metricRequest.metrics, metricRequest: metricRequest, universeId: universeId, cookie: cookie, completion: completion)
+    }
+
+    private func queryMetricCandidates(
+        _ metrics: [CreatorHubMetric],
+        metricRequest: MetricRequest,
+        universeId: Int64,
+        cookie: String,
+        completion: @escaping (Result<MetricFetchResult, Error>) -> Void
+    ) {
+        guard let metric = metrics.first else {
+            completion(.success(MetricFetchResult(value: nil, series: [])))
+            return
+        }
+
         let url = analyticsGatewayBaseURL
             .appendingPathComponent("v1")
             .appendingPathComponent("metrics")
@@ -185,7 +213,7 @@ final class CreatorHubScraper {
         let query = CreatorHubAnalyticsQuery(
             resourceType: "RESOURCE_TYPE_UNIVERSE",
             resourceId: String(universeId),
-            metric: metricRequest.metric.rawValue,
+            metric: metric.rawValue,
             granularity: metricRequest.granularity,
             breakdown: [],
             startTime: iso8601.string(from: metricRequest.startTime),
@@ -199,9 +227,17 @@ final class CreatorHubScraper {
         )
 
         request(url: url, cookie: cookie, body: body, contentType: "application/json", ignoreBadRequest: true) { (result: Result<CreatorHubAnalyticsResponse, Error>) in
-            completion(result.map { response in
-                self.aggregate(response.operation?.queryResult?.values, reduce: metricRequest.reduce)
-            })
+            switch result {
+            case .success(let response):
+                let metricResult = self.metricFetchResult(from: response.operation?.queryResult?.values, reduce: metricRequest.reduce)
+                if metricResult.value != nil || !metricResult.series.isEmpty || metrics.count == 1 {
+                    completion(.success(metricResult))
+                } else {
+                    self.queryMetricCandidates(Array(metrics.dropFirst()), metricRequest: metricRequest, universeId: universeId, cookie: cookie, completion: completion)
+                }
+            case .failure(let error):
+                completion(.failure(error))
+            }
         }
     }
 
@@ -302,6 +338,54 @@ final class CreatorHubScraper {
             return allValues.reduce(0, +)
         case .latest:
             return allValues.last
+        }
+    }
+
+    private func metricFetchResult(from series: [CreatorHubMetricSeries]?, reduce: CreatorHubMetricReduce) -> MetricFetchResult {
+        MetricFetchResult(
+            value: aggregate(series, reduce: reduce),
+            series: chartPoints(from: series, reduce: reduce)
+        )
+    }
+
+    private func chartPoints(from series: [CreatorHubMetricSeries]?, reduce: CreatorHubMetricReduce) -> [DashboardMetricPoint] {
+        let points = (series ?? [])
+            .flatMap { $0.datapoints ?? [] }
+            .compactMap { point -> DashboardMetricPoint? in
+                guard let value = point.value else {
+                    return nil
+                }
+
+                return DashboardMetricPoint(timestamp: point.timestamp, value: value)
+            }
+
+        guard !points.isEmpty else {
+            return []
+        }
+
+        if points.allSatisfy({ $0.timestamp == nil }) {
+            return points
+        }
+
+        var buckets: [String: [Double]] = [:]
+        for point in points {
+            buckets[point.timestamp ?? "", default: []].append(point.value)
+        }
+
+        return buckets.keys.sorted().compactMap { timestamp in
+            guard let values = buckets[timestamp], !values.isEmpty else {
+                return nil
+            }
+
+            let value: Double
+            switch reduce {
+            case .sum:
+                value = values.reduce(0, +)
+            case .latest:
+                value = values.reduce(0, +) / Double(values.count)
+            }
+
+            return DashboardMetricPoint(timestamp: timestamp.isEmpty ? nil : timestamp, value: value)
         }
     }
 
@@ -407,21 +491,17 @@ private struct CreatorHubSessionLoadResult {
 }
 
 private struct MetricRequest {
-    let slot: CreatorHubMetricSlot
+    let key: DashboardMetricKey
     let metric: CreatorHubMetric
+    var fallbackMetrics: [CreatorHubMetric] = []
     let startTime: Date
     let endTime: Date
     let granularity: String
     let reduce: CreatorHubMetricReduce
-}
 
-private enum CreatorHubMetricSlot {
-    case d1Retention
-    case d7Retention
-    case robuxSales72h
-    case totalSales
-    case performanceErrors
-    case playthroughRate
+    var metrics: [CreatorHubMetric] {
+        [metric] + fallbackMetrics
+    }
 }
 
 private enum CreatorHubMetric: String {
@@ -429,12 +509,18 @@ private enum CreatorHubMetric: String {
     case d1Retention = "AttributionD1RetentionRatio"
     case d7Retention = "AttributionD7RetentionRatio"
     case performanceErrors = "ErrorCount"
-    case playthroughRate = "FunnelStepOverallCompletionRate"
+    case qualifiedPlaythroughRate = "QualifiedEndToEndCVR"
+    case playthroughRate = "EndToEndCVR"
 }
 
 private enum CreatorHubMetricReduce {
     case sum
     case latest
+}
+
+private struct MetricFetchResult {
+    let value: Double?
+    let series: [DashboardMetricPoint]
 }
 
 private struct CreatorHubAnalyticsRequest: Encodable {
@@ -478,4 +564,24 @@ private struct CreatorHubMetricSeries: Decodable {
 private struct CreatorHubMetricDataPoint: Decodable {
     let timestamp: String?
     let value: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case timestamp
+        case startTime
+        case endTime
+        case time
+        case date
+        case value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedTimestamp = try container.decodeIfPresent(String.self, forKey: .timestamp)
+        let decodedStartTime = try container.decodeIfPresent(String.self, forKey: .startTime)
+        let decodedEndTime = try container.decodeIfPresent(String.self, forKey: .endTime)
+        let decodedTime = try container.decodeIfPresent(String.self, forKey: .time)
+        let decodedDate = try container.decodeIfPresent(String.self, forKey: .date)
+        timestamp = decodedTimestamp ?? decodedStartTime ?? decodedEndTime ?? decodedTime ?? decodedDate
+        value = try container.decodeIfPresent(Double.self, forKey: .value)
+    }
 }

@@ -1,5 +1,56 @@
 import Foundation
 
+struct DashboardMetricPoint: Codable {
+    let timestamp: String?
+    let value: Double
+}
+
+enum DashboardMetricKey: String, CaseIterable, Codable {
+    case d1Retention
+    case d7Retention
+    case robuxSales72h
+    case totalSales
+    case performanceErrors
+    case playthroughRate
+
+    var title: String {
+        switch self {
+        case .d1Retention:
+            return "D1 retention"
+        case .d7Retention:
+            return "D7 retention"
+        case .robuxSales72h:
+            return "72h Robux sales"
+        case .totalSales:
+            return "Total sales"
+        case .performanceErrors:
+            return "Performance errors"
+        case .playthroughRate:
+            return "Playthrough rate"
+        }
+    }
+
+    var placeholder: String {
+        switch self {
+        case .d1Retention, .d7Retention, .playthroughRate:
+            return "18.4%"
+        case .robuxSales72h, .totalSales:
+            return "12,340"
+        case .performanceErrors:
+            return "3"
+        }
+    }
+
+    var averagesMultiGameSeries: Bool {
+        switch self {
+        case .d1Retention, .d7Retention, .playthroughRate:
+            return true
+        case .robuxSales72h, .totalSales, .performanceErrors:
+            return false
+        }
+    }
+}
+
 struct DashboardMetricsRecord: Codable {
     let universeId: Int64
     var d1Retention: String?
@@ -8,7 +59,58 @@ struct DashboardMetricsRecord: Codable {
     var totalSales: String?
     var performanceErrors: String?
     var playthroughRate: String?
+    var metricSeries: [String: [DashboardMetricPoint]]?
     var updatedAt: Date?
+}
+
+extension DashboardMetricsRecord {
+    func textValue(for key: DashboardMetricKey) -> String? {
+        switch key {
+        case .d1Retention:
+            return d1Retention
+        case .d7Retention:
+            return d7Retention
+        case .robuxSales72h:
+            return robuxSales72h
+        case .totalSales:
+            return totalSales
+        case .performanceErrors:
+            return performanceErrors
+        case .playthroughRate:
+            return playthroughRate
+        }
+    }
+
+    mutating func setTextValue(_ value: String?, for key: DashboardMetricKey) {
+        switch key {
+        case .d1Retention:
+            d1Retention = value
+        case .d7Retention:
+            d7Retention = value
+        case .robuxSales72h:
+            robuxSales72h = value
+        case .totalSales:
+            totalSales = value
+        case .performanceErrors:
+            performanceErrors = value
+        case .playthroughRate:
+            playthroughRate = value
+        }
+    }
+
+    func series(for key: DashboardMetricKey) -> [DashboardMetricPoint] {
+        metricSeries?[key.rawValue] ?? []
+    }
+
+    mutating func setSeries(_ points: [DashboardMetricPoint], for key: DashboardMetricKey) {
+        guard !points.isEmpty else {
+            return
+        }
+
+        var updatedSeries = metricSeries ?? [:]
+        updatedSeries[key.rawValue] = points
+        metricSeries = updatedSeries
+    }
 }
 
 private struct DashboardMetricsFile: Codable {
@@ -28,14 +130,9 @@ final class DashboardMetricsStore {
 
     func metricStatuses(for universeIds: [Int64]) -> [MetricSourceStatus] {
         let records = loadRecords(for: universeIds)
-        return [
-            status(title: "D1 retention", source: "Creator Hub cache", records: records, value: \.d1Retention),
-            status(title: "D7 retention", source: "Creator Hub cache", records: records, value: \.d7Retention),
-            status(title: "72h Robux sales", source: "Creator Hub cache", records: records, value: \.robuxSales72h),
-            status(title: "Total sales", source: "Creator Hub cache", records: records, value: \.totalSales),
-            status(title: "Performance errors", source: "Creator Hub cache", records: records, value: \.performanceErrors),
-            status(title: "Playthrough rate", source: "Creator Hub cache", records: records, value: \.playthroughRate),
-        ]
+        return DashboardMetricKey.allCases.map {
+            status(metric: $0, source: "Creator Hub cache", records: records)
+        }
     }
 
     func record(for universeId: Int64) -> DashboardMetricsRecord? {
@@ -60,8 +157,8 @@ final class DashboardMetricsStore {
     }
 
     static func waitingStatuses() -> [MetricSourceStatus] {
-        metricTitles.map {
-            MetricSourceStatus(title: $0, status: "Waiting", source: "Config", detail: "Add games first")
+        DashboardMetricKey.allCases.map {
+            MetricSourceStatus(title: $0.title, status: "Waiting", source: "Config", detail: "Add games first")
         }
     }
 
@@ -99,17 +196,13 @@ final class DashboardMetricsStore {
         try data.write(to: metricsURL, options: [.atomic])
     }
 
-    private func status(
-        title: String,
-        source: String,
-        records: [DashboardMetricsRecord],
-        value: (DashboardMetricsRecord) -> String?
-    ) -> MetricSourceStatus {
-        let values = records.compactMap(value).filter { !$0.isEmpty }
+    private func status(metric: DashboardMetricKey, source: String, records: [DashboardMetricsRecord]) -> MetricSourceStatus {
+        let values = records.compactMap { $0.textValue(for: metric) }.filter { !$0.isEmpty }
+        let series = seriesValues(for: metric, records: records)
 
         guard !values.isEmpty else {
             return MetricSourceStatus(
-                title: title,
+                title: metric.title,
                 status: "Pending",
                 source: "Creator Hub",
                 detail: "No local dashboard metric cached"
@@ -118,21 +211,79 @@ final class DashboardMetricsStore {
 
         if values.count == 1 {
             return MetricSourceStatus(
-                title: title,
+                title: metric.title,
                 status: "Live",
                 source: source,
                 detail: updatedText(records: records),
-                value: values[0]
+                value: values[0],
+                series: series
             )
         }
 
         return MetricSourceStatus(
-            title: title,
+            title: metric.title,
             status: "Cached",
             source: source,
             detail: "\(values.count) games have cached values",
-            value: "\(values.count) games"
+            value: "\(values.count) games",
+            series: series
         )
+    }
+
+    private func seriesValues(for metric: DashboardMetricKey, records: [DashboardMetricsRecord]) -> [Double] {
+        let seriesByRecord = records
+            .map { $0.series(for: metric) }
+            .filter { !$0.isEmpty }
+
+        guard !seriesByRecord.isEmpty else {
+            return []
+        }
+
+        if seriesByRecord.count == 1 {
+            return seriesByRecord[0].map(\.value)
+        }
+
+        if seriesByRecord.allSatisfy({ $0.allSatisfy { $0.timestamp == nil } }) {
+            let maxCount = seriesByRecord.map(\.count).max() ?? 0
+            return (0..<maxCount).compactMap { index in
+                let values = seriesByRecord.compactMap { series in
+                    series.indices.contains(index) ? series[index].value : nil
+                }
+
+                guard !values.isEmpty else {
+                    return nil
+                }
+
+                if metric.averagesMultiGameSeries {
+                    return values.reduce(0, +) / Double(values.count)
+                }
+
+                return values.reduce(0, +)
+            }
+        }
+
+        var buckets: [String: [Double]] = [:]
+        for series in seriesByRecord {
+            for point in series {
+                guard let timestamp = point.timestamp else {
+                    continue
+                }
+
+                buckets[timestamp, default: []].append(point.value)
+            }
+        }
+
+        return buckets.keys.sorted().compactMap { timestamp in
+            guard let values = buckets[timestamp], !values.isEmpty else {
+                return nil
+            }
+
+            if metric.averagesMultiGameSeries {
+                return values.reduce(0, +) / Double(values.count)
+            }
+
+            return values.reduce(0, +)
+        }
     }
 
     private func updatedText(records: [DashboardMetricsRecord]) -> String {
@@ -147,12 +298,4 @@ final class DashboardMetricsStore {
         return "Updated \(formatter.string(from: latestDate))"
     }
 
-    private static let metricTitles = [
-        "D1 retention",
-        "D7 retention",
-        "72h Robux sales",
-        "Total sales",
-        "Performance errors",
-        "Playthrough rate",
-    ]
 }

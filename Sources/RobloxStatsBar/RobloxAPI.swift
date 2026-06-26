@@ -43,13 +43,15 @@ struct MetricSourceStatus {
     let source: String
     let detail: String
     let value: String?
+    let series: [Double]
 
-    init(title: String, status: String, source: String, detail: String, value: String? = nil) {
+    init(title: String, status: String, source: String, detail: String, value: String? = nil, series: [Double] = []) {
         self.title = title
         self.status = status
         self.source = source
         self.detail = detail
         self.value = value
+        self.series = series
     }
 }
 
@@ -245,14 +247,9 @@ final class RobloxAPI {
     }
 
     private static func dashboardMetricStatuses() -> [MetricSourceStatus] {
-        [
-            MetricSourceStatus(title: "D1 retention", status: "Pending", source: "Creator Hub", detail: "Analytics source needed"),
-            MetricSourceStatus(title: "D7 retention", status: "Pending", source: "Creator Hub", detail: "Analytics source needed"),
-            MetricSourceStatus(title: "72h Robux sales", status: "Pending", source: "Creator Hub", detail: "Authenticated economy source needed"),
-            MetricSourceStatus(title: "Total sales", status: "Pending", source: "Creator Hub", detail: "Authenticated economy source needed"),
-            MetricSourceStatus(title: "Performance errors", status: "Pending", source: "Creator Hub", detail: "Performance source needed"),
-            MetricSourceStatus(title: "Playthrough rate", status: "Pending", source: "Creator Hub/custom", detail: "Funnel source needed"),
-        ]
+        DashboardMetricKey.allCases.map {
+            MetricSourceStatus(title: $0.title, status: "Pending", source: "Creator Hub", detail: "Analytics source needed")
+        }
     }
 }
 

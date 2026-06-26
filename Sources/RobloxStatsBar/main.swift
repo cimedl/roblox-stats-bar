@@ -1,75 +1,88 @@
 import AppKit
 import Foundation
 
-private enum CreatorMetricField: CaseIterable {
-    case d1Retention
-    case d7Retention
-    case robuxSales72h
-    case totalSales
-    case performanceErrors
-    case playthroughRate
+private typealias CreatorMetricField = DashboardMetricKey
 
-    var title: String {
-        switch self {
-        case .d1Retention:
-            return "D1 retention"
-        case .d7Retention:
-            return "D7 retention"
-        case .robuxSales72h:
-            return "72h Robux sales"
-        case .totalSales:
-            return "Total sales"
-        case .performanceErrors:
-            return "Performance errors"
-        case .playthroughRate:
-            return "Playthrough rate"
-        }
-    }
-
-    var placeholder: String {
-        switch self {
-        case .d1Retention, .d7Retention, .playthroughRate:
-            return "18.4%"
-        case .robuxSales72h, .totalSales:
-            return "12,340"
-        case .performanceErrors:
-            return "3"
-        }
-    }
-
+private extension DashboardMetricKey {
     func value(from record: DashboardMetricsRecord) -> String {
-        switch self {
-        case .d1Retention:
-            return record.d1Retention ?? ""
-        case .d7Retention:
-            return record.d7Retention ?? ""
-        case .robuxSales72h:
-            return record.robuxSales72h ?? ""
-        case .totalSales:
-            return record.totalSales ?? ""
-        case .performanceErrors:
-            return record.performanceErrors ?? ""
-        case .playthroughRate:
-            return record.playthroughRate ?? ""
-        }
+        record.textValue(for: self) ?? ""
     }
 
     func apply(_ value: String?, to record: inout DashboardMetricsRecord) {
-        switch self {
-        case .d1Retention:
-            record.d1Retention = value
-        case .d7Retention:
-            record.d7Retention = value
-        case .robuxSales72h:
-            record.robuxSales72h = value
-        case .totalSales:
-            record.totalSales = value
-        case .performanceErrors:
-            record.performanceErrors = value
-        case .playthroughRate:
-            record.playthroughRate = value
-        }
+        record.setTextValue(value, for: self)
     }
+}
+
+private final class ControlPanelView: NSView {
+    var fillColor = NSColor.controlBackgroundColor.withAlphaComponent(0.92)
+    var strokeColor = NSColor.separatorColor.withAlphaComponent(0.42)
+    var cornerRadius: CGFloat = 12
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+        fillColor.setFill()
+        path.fill()
+        strokeColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+}
+
+private final class SparklineView: NSView {
+    var values: [Double] = []
+    var strokeColor = NSColor.controlAccentColor
+    var fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12)
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let rect = bounds.insetBy(dx: 2, dy: 3)
+        guard rect.width > 0, rect.height > 0 else {
+            return
+        }
+
+        guard values.count >= 2 else {
+            return
+        }
+
+        let minValue = values.min() ?? 0
+        let maxValue = values.max() ?? 0
+        let range = max(maxValue - minValue, 0.0001)
+        let stepX = rect.width / CGFloat(values.count - 1)
+        let path = NSBezierPath()
+        let fillPath = NSBezierPath()
+
+        for (index, value) in values.enumerated() {
+            let x = rect.minX + CGFloat(index) * stepX
+            let normalized = (value - minValue) / range
+            let y = rect.minY + CGFloat(normalized) * rect.height
+            let point = NSPoint(x: x, y: y)
+
+            if index == 0 {
+                path.move(to: point)
+                fillPath.move(to: NSPoint(x: x, y: rect.minY))
+                fillPath.line(to: point)
+            } else {
+                path.line(to: point)
+                fillPath.line(to: point)
+            }
+        }
+
+        fillPath.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        fillPath.close()
+        fillColor.setFill()
+        fillPath.fill()
+
+        strokeColor.setStroke()
+        path.lineWidth = 1.8
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        path.stroke()
+    }
+
 }
 
 final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
@@ -213,88 +226,131 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
             statusMenu.addItem(summaryItem(snapshot))
             statusMenu.addItem(.separator())
 
-            if snapshot.games.isEmpty {
-                let emptyItem = NSMenuItem(title: "No enabled games", action: nil, keyEquivalent: "")
-                emptyItem.isEnabled = false
-                statusMenu.addItem(emptyItem)
-            } else {
-                for game in snapshot.games {
-                    statusMenu.addItem(gameItem(game))
-                }
-            }
+            let gamesItem = NSMenuItem(title: "Games", action: nil, keyEquivalent: "")
+            gamesItem.submenu = gamesMenu(snapshot.games)
+            statusMenu.addItem(gamesItem)
 
-            statusMenu.addItem(.separator())
-            statusMenu.addItem(dashboardMetricsItem(snapshot.dashboardMetrics))
-            if let creatorHubFetchStatus {
-                let item = NSMenuItem(title: "Creator Hub fetch: \(creatorHubFetchStatus)", action: nil, keyEquivalent: "")
-                item.isEnabled = false
-                statusMenu.addItem(item)
-            }
+            let analyticsItem = NSMenuItem(title: "Analytics", action: nil, keyEquivalent: "")
+            analyticsItem.submenu = analyticsMenu(snapshot)
+            statusMenu.addItem(analyticsItem)
         } else {
             let loadingItem = NSMenuItem(title: trackedGames().isEmpty ? "Add games to start tracking" : "Loading Roblox stats...", action: nil, keyEquivalent: "")
             loadingItem.isEnabled = false
             statusMenu.addItem(loadingItem)
         }
 
-        statusMenu.addItem(.separator())
-        appendGameToggles()
+        if !config.games.isEmpty {
+            statusMenu.addItem(.separator())
+            let trackingItem = NSMenuItem(title: "Tracking", action: nil, keyEquivalent: "")
+            trackingItem.submenu = trackingMenu()
+            statusMenu.addItem(trackingItem)
+        }
+
         statusMenu.addItem(.separator())
         statusMenu.addItem(refreshItem)
         statusMenu.addItem(manageItem)
-        metricsItem.isEnabled = !config.games.isEmpty
-        statusMenu.addItem(metricsItem)
-        statusMenu.addItem(sessionItem)
         statusMenu.addItem(.separator())
         statusMenu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     private func summaryItem(_ snapshot: RobloxStatsSnapshot) -> NSMenuItem {
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 136))
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 170))
+        let panel = ControlPanelView(frame: NSRect(x: 8, y: 8, width: 374, height: 154))
+        view.addSubview(panel)
 
-        addMetric(title: "Current CCU", value: compact(snapshot.totalCCU), x: 14, y: 84, to: view)
-        addMetric(title: "Total visits", value: compact(snapshot.totalVisits), x: 130, y: 84, to: view)
-        addMetric(title: "Favorites", value: compact(snapshot.totalFavorites), x: 246, y: 84, to: view)
+        panel.addSubview(label("Overview", frame: NSRect(x: 14, y: 126, width: 180, height: 18), font: .systemFont(ofSize: 13, weight: .semibold), color: .labelColor))
+        panel.addSubview(label("Updated \(dateFormatter.string(from: snapshot.capturedAt))", frame: NSRect(x: 210, y: 127, width: 150, height: 16), font: .systemFont(ofSize: 10), color: .secondaryLabelColor))
 
-        addMetric(title: "Tracked games", value: "\(snapshot.games.count)", x: 14, y: 34, to: view)
-        let cachedDashboardCount = snapshot.dashboardMetrics.filter { $0.value != nil }.count
-        addMetric(title: "Dashboard stats", value: "\(cachedDashboardCount)/\(snapshot.dashboardMetrics.count)", x: 130, y: 34, to: view)
-        addMetric(title: "Updated", value: dateFormatter.string(from: snapshot.capturedAt), x: 246, y: 34, to: view)
+        addSummaryTile(title: "Current CCU", value: compact(snapshot.totalCCU), frame: NSRect(x: 12, y: 70, width: 108, height: 48), to: panel)
+        addSummaryTile(title: "Visits", value: compact(snapshot.totalVisits), frame: NSRect(x: 133, y: 70, width: 108, height: 48), to: panel)
+        addSummaryTile(title: "Favorites", value: compact(snapshot.totalFavorites), frame: NSRect(x: 254, y: 70, width: 108, height: 48), to: panel)
 
-        return viewMenuItem(view)
-    }
-
-    private func gameItem(_ game: RobloxGameStat) -> NSMenuItem {
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 76))
-        let title = label(game.name, frame: NSRect(x: 14, y: 48, width: 332, height: 18), font: .systemFont(ofSize: 13, weight: .semibold), color: .labelColor)
-        view.addSubview(title)
-
-        let detail = "CCU \(compact(game.playing ?? 0))  |  Visits \(compact(game.visits ?? 0))  |  Favorites \(compact(game.favoritedCount ?? 0))"
-        view.addSubview(label(detail, frame: NSRect(x: 14, y: 28, width: 332, height: 16), font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular), color: .secondaryLabelColor))
-
-        let idText = "Universe \(game.id)" + (game.rootPlaceId.map { "  |  Place \($0)" } ?? "")
-        view.addSubview(label(idText, frame: NSRect(x: 14, y: 10, width: 332, height: 14), font: .systemFont(ofSize: 10), color: .tertiaryLabelColor))
+        let playthrough = metricStatus(.playthroughRate, in: snapshot.dashboardMetrics)?.value ?? "--"
+        let sales = metricStatus(.robuxSales72h, in: snapshot.dashboardMetrics)?.value ?? "--"
+        let errors = metricStatus(.performanceErrors, in: snapshot.dashboardMetrics)?.value ?? "--"
+        addSummaryTile(title: "Playthrough", value: playthrough, frame: NSRect(x: 12, y: 12, width: 108, height: 48), to: panel)
+        addSummaryTile(title: "72h sales", value: sales, frame: NSRect(x: 133, y: 12, width: 108, height: 48), to: panel)
+        addSummaryTile(title: "Errors", value: errors, frame: NSRect(x: 254, y: 12, width: 108, height: 48), to: panel)
 
         return viewMenuItem(view)
     }
 
-    private func dashboardMetricsItem(_ metrics: [MetricSourceStatus]) -> NSMenuItem {
-        let rowHeight: CGFloat = 34
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: CGFloat(metrics.count) * rowHeight + 18))
-        view.addSubview(label("Creator Hub metrics", frame: NSRect(x: 14, y: view.frame.height - 20, width: 332, height: 16), font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor))
+    private func gamesMenu(_ games: [RobloxGameStat]) -> NSMenu {
+        let menu = NSMenu(title: "Games")
+        if games.isEmpty {
+            let emptyItem = NSMenuItem(title: "No enabled games", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+        } else {
+            menu.addItem(gamesPanelItem(games))
+        }
 
-        for (index, metric) in metrics.enumerated() {
-            let y = view.frame.height - 52 - CGFloat(index) * rowHeight
-            let statusText = metric.value ?? metric.status
-            view.addSubview(label(metric.title, frame: NSRect(x: 14, y: y + 14, width: 122, height: 16), font: .systemFont(ofSize: 11, weight: .medium), color: .labelColor))
-            view.addSubview(label(statusText, frame: NSRect(x: 140, y: y + 14, width: 62, height: 16), font: .systemFont(ofSize: 10, weight: .semibold), color: .secondaryLabelColor))
-            view.addSubview(label(metric.source, frame: NSRect(x: 206, y: y + 14, width: 140, height: 16), font: .systemFont(ofSize: 10), color: .secondaryLabelColor))
-            view.addSubview(label(metric.detail, frame: NSRect(x: 14, y: y, width: 332, height: 14), font: .systemFont(ofSize: 10), color: .tertiaryLabelColor))
+        return menu
+    }
+
+    private func gamesPanelItem(_ games: [RobloxGameStat]) -> NSMenuItem {
+        let width: CGFloat = 360
+        let margin: CGFloat = 10
+        let rowHeight: CGFloat = 68
+        let bottomPadding: CGFloat = 14
+        let panelHeight = CGFloat(games.count) * rowHeight + 48 + bottomPadding
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: panelHeight + margin * 2))
+        let panel = ControlPanelView(frame: NSRect(x: margin, y: margin, width: width - margin * 2, height: panelHeight))
+        view.addSubview(panel)
+
+        panel.addSubview(label("Games", frame: NSRect(x: 14, y: panel.frame.height - 30, width: 180, height: 18), font: .systemFont(ofSize: 13, weight: .semibold), color: .labelColor))
+        panel.addSubview(label("\(games.count) enabled", frame: NSRect(x: 226, y: panel.frame.height - 29, width: 86, height: 16), font: .systemFont(ofSize: 10), color: .secondaryLabelColor))
+
+        for (index, game) in games.enumerated() {
+            let y = bottomPadding + CGFloat(games.count - index - 1) * rowHeight
+            addGameCard(game, frame: NSRect(x: 12, y: y, width: panel.frame.width - 24, height: 58), to: panel)
         }
 
         return viewMenuItem(view)
     }
 
-    private func appendGameToggles() {
+    private func analyticsMenu(_ snapshot: RobloxStatsSnapshot) -> NSMenu {
+        let menu = NSMenu(title: "Analytics")
+        menu.addItem(analyticsPanelItem(snapshot.dashboardMetrics))
+        return menu
+    }
+
+    private func analyticsPanelItem(_ metrics: [MetricSourceStatus]) -> NSMenuItem {
+        let width: CGFloat = 360
+        let margin: CGFloat = 10
+        let rowHeight: CGFloat = 64
+        let bottomPadding: CGFloat = 14
+        let footerHeight: CGFloat = creatorHubFetchStatus == nil ? 0 : 20
+        let panelHeight = CGFloat(metrics.count) * rowHeight + 48 + bottomPadding + footerHeight
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: panelHeight + margin * 2))
+        let panel = ControlPanelView(frame: NSRect(x: margin, y: margin, width: width - margin * 2, height: panelHeight))
+        view.addSubview(panel)
+
+        panel.addSubview(label("Analytics", frame: NSRect(x: 14, y: panel.frame.height - 30, width: 180, height: 18), font: .systemFont(ofSize: 13, weight: .semibold), color: .labelColor))
+        let cachedCount = metrics.filter { $0.value != nil }.count
+        panel.addSubview(label("\(cachedCount)/\(metrics.count) cached", frame: NSRect(x: 226, y: panel.frame.height - 29, width: 98, height: 16), font: .systemFont(ofSize: 10), color: .secondaryLabelColor))
+
+        let rowBaseY = bottomPadding + footerHeight
+
+        for (index, metric) in metrics.enumerated() {
+            let y = rowBaseY + CGFloat(metrics.count - index - 1) * rowHeight
+            addAnalyticsCard(metric, frame: NSRect(x: 12, y: y, width: panel.frame.width - 24, height: 54), to: panel)
+        }
+
+        if let creatorHubFetchStatus {
+            panel.addSubview(label(creatorHubFetchStatus, frame: NSRect(x: 14, y: 12, width: panel.frame.width - 28, height: 14), font: .systemFont(ofSize: 10), color: .tertiaryLabelColor))
+        }
+
+        return viewMenuItem(view)
+    }
+
+    private func trackingMenu() -> NSMenu {
+        let menu = NSMenu(title: "Tracking")
+        appendGameToggles(to: menu)
+        return menu
+    }
+
+    private func appendGameToggles(to menu: NSMenu) {
         let games = config.games.sorted { ($0.displayName ?? "\($0.universeId)") < ($1.displayName ?? "\($1.universeId)") }
         guard !games.isEmpty else {
             return
@@ -306,7 +362,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
             item.target = self
             item.state = game.enabled ? .on : .off
             item.tag = Int(game.universeId)
-            statusMenu.addItem(item)
+            menu.addItem(item)
         }
     }
 
@@ -757,6 +813,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
             totalSales: nil,
             performanceErrors: nil,
             playthroughRate: nil,
+            metricSeries: dashboardMetricsStore.record(for: universeId)?.metricSeries,
             updatedAt: Date()
         )
 
@@ -903,9 +960,84 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func addMetric(title: String, value: String, x: CGFloat, y: CGFloat, to view: NSView) {
-        view.addSubview(label(title, frame: NSRect(x: x, y: y + 24, width: 104, height: 14), font: .systemFont(ofSize: 10, weight: .medium), color: .secondaryLabelColor))
-        view.addSubview(label(value, frame: NSRect(x: x, y: y, width: 104, height: 24), font: .monospacedDigitSystemFont(ofSize: 17, weight: .semibold), color: .labelColor))
+    private func addSummaryTile(title: String, value: String, frame: NSRect, to view: NSView) {
+        let card = ControlPanelView(frame: frame)
+        card.cornerRadius = 9
+        card.fillColor = NSColor.textBackgroundColor.withAlphaComponent(0.72)
+        card.strokeColor = NSColor.separatorColor.withAlphaComponent(0.25)
+        view.addSubview(card)
+
+        card.addSubview(label(title, frame: NSRect(x: 10, y: 28, width: frame.width - 20, height: 13), font: .systemFont(ofSize: 9, weight: .medium), color: .secondaryLabelColor))
+        card.addSubview(label(value, frame: NSRect(x: 10, y: 8, width: frame.width - 20, height: 20), font: .monospacedDigitSystemFont(ofSize: 15, weight: .semibold), color: .labelColor))
+    }
+
+    private func addGameCard(_ game: RobloxGameStat, frame: NSRect, to view: NSView) {
+        let card = ControlPanelView(frame: frame)
+        card.cornerRadius = 9
+        card.fillColor = NSColor.textBackgroundColor.withAlphaComponent(0.68)
+        card.strokeColor = NSColor.separatorColor.withAlphaComponent(0.22)
+        view.addSubview(card)
+
+        card.addSubview(label(game.name, frame: NSRect(x: 12, y: 34, width: frame.width - 24, height: 17), font: .systemFont(ofSize: 12, weight: .semibold), color: .labelColor))
+
+        let detail = "CCU \(compact(game.playing ?? 0))  |  Visits \(compact(game.visits ?? 0))  |  Favorites \(compact(game.favoritedCount ?? 0))"
+        card.addSubview(label(detail, frame: NSRect(x: 12, y: 18, width: frame.width - 24, height: 14), font: .monospacedDigitSystemFont(ofSize: 10, weight: .regular), color: .secondaryLabelColor))
+
+        let idText = "Universe \(game.id)" + (game.rootPlaceId.map { "  |  Place \($0)" } ?? "")
+        card.addSubview(label(idText, frame: NSRect(x: 12, y: 5, width: frame.width - 24, height: 12), font: .systemFont(ofSize: 9), color: .tertiaryLabelColor))
+    }
+
+    private func addAnalyticsCard(_ metric: MetricSourceStatus, frame: NSRect, to view: NSView) {
+        let card = ControlPanelView(frame: frame)
+        card.cornerRadius = 9
+        card.fillColor = NSColor.textBackgroundColor.withAlphaComponent(0.68)
+        card.strokeColor = NSColor.separatorColor.withAlphaComponent(0.22)
+        view.addSubview(card)
+
+        let padding: CGFloat = 12
+        let valueText = metric.value ?? metric.status
+        let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        let measuredValueWidth = (valueText as NSString).size(withAttributes: [.font: valueFont]).width
+        let valueWidth = min(72, max(46, ceil(measuredValueWidth) + 6))
+        let valueX = frame.width - padding - valueWidth
+        let graphX: CGFloat = 128
+        let graphWidth = max(54, valueX - graphX - 10)
+        let leftWidth = graphX - padding - 8
+        let titleHeight: CGFloat = 16
+        let sourceHeight: CGFloat = 13
+        let textGap: CGFloat = 3
+        let textStackHeight = titleHeight + textGap + sourceHeight
+        let textStackY = (frame.height - textStackHeight) / 2
+        let titleY = textStackY + sourceHeight + textGap
+        let sourceY = textStackY
+        let valueHeight: CGFloat = 18
+        let valueY = (frame.height - valueHeight) / 2
+        let graphHeight: CGFloat = 30
+        let graphY = (frame.height - graphHeight) / 2
+
+        card.addSubview(label(metric.title, frame: NSRect(x: padding, y: titleY, width: leftWidth, height: titleHeight), font: .systemFont(ofSize: 11, weight: .semibold), color: .labelColor))
+
+        let valueLabel = label(valueText, frame: NSRect(x: valueX, y: valueY, width: valueWidth, height: valueHeight), font: valueFont, color: metric.value == nil ? .secondaryLabelColor : .labelColor)
+        valueLabel.alignment = .right
+        card.addSubview(valueLabel)
+
+        let series = Array(metric.series.suffix(45))
+        if series.count >= 2 {
+            let graph = SparklineView(frame: NSRect(x: graphX, y: graphY, width: graphWidth, height: graphHeight))
+            graph.values = series
+            card.addSubview(graph)
+        } else {
+            let trendLabel = label("No trend", frame: NSRect(x: graphX, y: valueY + 2, width: graphWidth, height: 14), font: .systemFont(ofSize: 9, weight: .medium), color: .tertiaryLabelColor)
+            trendLabel.alignment = .center
+            card.addSubview(trendLabel)
+        }
+
+        let sourceText = metric.value == nil ? metric.detail : "\(metric.source) - \(metric.detail)"
+        card.addSubview(label(sourceText, frame: NSRect(x: padding, y: sourceY, width: leftWidth, height: sourceHeight), font: .systemFont(ofSize: 9), color: .tertiaryLabelColor))
+    }
+
+    private func metricStatus(_ key: DashboardMetricKey, in metrics: [MetricSourceStatus]) -> MetricSourceStatus? {
+        metrics.first { $0.title == key.title }
     }
 
     private func label(_ text: String, frame: NSRect, font: NSFont, color: NSColor) -> NSTextField {
