@@ -23,7 +23,7 @@ The app has menu rows for the requested dashboard-backed metrics:
 - Performance error count
 - Playthrough rate
 
-On startup and refresh, the app attempts a local-only Creator Hub fetch when a Roblox cookie is configured. Use **Update Creator Hub Metrics...** from the menu bar to fetch a selected game on demand, open the selected game's Creator Hub page, or manually save fallback values into the local dashboard metric cache.
+On startup and refresh, the app attempts a local-only Creator Hub fetch from the active Chrome Roblox session. Use **Update Creator Hub Metrics...** from the menu bar to fetch a selected game on demand, open the selected game's Creator Hub page, or manually save fallback values into the local dashboard metric cache.
 
 Roblox's current Open Cloud docs say analytics/engagement and revenue breakdown data are not exposed through a supported REST API, so the authenticated Creator Hub fetch uses private dashboard endpoints and a local ignored cookie file. See [docs/data-sources.md](docs/data-sources.md).
 
@@ -52,13 +52,13 @@ Optional dashboard metric cache:
 ~/.config/roblox-stats-bar/dashboard-metrics.json
 ```
 
-Optional authenticated Creator Hub cookie:
+Optional authenticated Creator Hub cookie fallback:
 
 ```text
 ~/.config/roblox-stats-bar/roblox-cookie.txt
 ```
 
-The cookie file can contain either the raw cookie value or `.ROBLOSECURITY=<value>`. It is local-only and ignored by git.
+The app first attempts to read Chrome's encrypted local Roblox session. The cookie file can contain either the raw cookie value or `.ROBLOSECURITY=<value>` as a fallback. It is local-only and ignored by git.
 
 Example shape:
 

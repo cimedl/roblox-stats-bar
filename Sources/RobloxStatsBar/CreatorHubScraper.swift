@@ -26,9 +26,8 @@ final class CreatorHubScraper {
     private let session: URLSession
     private let metricsStore: DashboardMetricsStore
     private let calendar = Calendar(identifier: .gregorian)
-    private let apiBaseURL = URL(string: "https://apis.roblox.com/developer-analytics-aggregations")!
-    private let insightsBaseURL = URL(string: "https://apis.roblox.com/universe-analytics-insights")!
-    private let safariCookieImporter = SafariCookieImporter()
+    private let analyticsGatewayBaseURL = URL(string: "https://apis.roblox.com/analytics-query-gateway")!
+    private let chromeCookieImporter = ChromeCookieImporter()
     private let cookieURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config")
         .appendingPathComponent("roblox-stats-bar")
@@ -128,12 +127,11 @@ final class CreatorHubScraper {
         var firstError: Error?
 
         for request in [
-            MetricRequest(slot: .robuxSales72h, metric: .dailyRevenue, backend: .monetization, startTime: start72Hours, endTime: end, aggregationType: "Total", reduce: .sum),
-            MetricRequest(slot: .totalSales, metric: .dailyRevenue, backend: .monetization, startTime: start365Days, endTime: end, aggregationType: "Total", reduce: .sum),
-            MetricRequest(slot: .d1Retention, metric: .d1Retention, backend: .insightsSummary, startTime: start30Days, endTime: end, aggregationType: "Average", reduce: .latest),
-            MetricRequest(slot: .d7Retention, metric: .d7Retention, backend: .insightsSummary, startTime: start30Days, endTime: end, aggregationType: "Average", reduce: .latest),
-            MetricRequest(slot: .performanceErrors, metric: .performanceErrors, backend: .insightsSummary, startTime: start72Hours, endTime: end, aggregationType: "Total", reduce: .sum),
-            MetricRequest(slot: .playthroughRate, metric: .playthroughRate, backend: .insightsSummary, startTime: start30Days, endTime: end, aggregationType: "Average", reduce: .latest),
+            MetricRequest(slot: .robuxSales72h, metric: .dailyRevenue, startTime: start72Hours, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
+            MetricRequest(slot: .totalSales, metric: .dailyRevenue, startTime: start365Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
+            MetricRequest(slot: .d1Retention, metric: .d1Retention, startTime: start30Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .latest),
+            MetricRequest(slot: .d7Retention, metric: .d7Retention, startTime: start30Days, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .latest),
+            MetricRequest(slot: .performanceErrors, metric: .performanceErrors, startTime: start72Hours, endTime: end, granularity: "METRIC_GRANULARITY_ONE_DAY", reduce: .sum),
         ] {
             group.enter()
             queryMetric(request, universeId: universeId, cookie: cookie) { result in
@@ -176,72 +174,33 @@ final class CreatorHubScraper {
     }
 
     private func queryMetric(_ metricRequest: MetricRequest, universeId: Int64, cookie: String, completion: @escaping (Result<Double?, Error>) -> Void) {
-        switch metricRequest.backend {
-        case .monetization:
-            queryMonetizationMetric(metricRequest, universeId: universeId, cookie: cookie, completion: completion)
-        case .insightsSummary:
-            queryInsightsSummaryMetric(metricRequest, universeId: universeId, cookie: cookie, completion: completion)
-        }
-    }
-
-    private func queryMonetizationMetric(_ metricRequest: MetricRequest, universeId: Int64, cookie: String, completion: @escaping (Result<Double?, Error>) -> Void) {
-        let url = apiBaseURL
-            .appendingPathComponent("v2")
+        let url = analyticsGatewayBaseURL
+            .appendingPathComponent("v1")
             .appendingPathComponent("metrics")
-            .appendingPathComponent("monetization")
-            .appendingPathComponent("universes")
+            .appendingPathComponent("resource")
+            .appendingPathComponent("RESOURCE_TYPE_UNIVERSE")
+            .appendingPathComponent("id")
             .appendingPathComponent(String(universeId))
 
-        let body = CreatorHubMetricRequestBody(
-            metric: metricRequest.metric.rawValue,
-            aggregationType: metricRequest.aggregationType,
-            granularity: "OneDay",
-            startTime: iso8601.string(from: metricRequest.startTime),
-            endTime: iso8601.string(from: metricRequest.endTime),
-            breakdown: [],
-            filters: []
-        )
-
-        request(url: url, cookie: cookie, body: body, contentType: "application/json-patch+json") { (result: Result<CreatorHubMetricResponse, Error>) in
-            completion(result.map { response in
-                self.aggregate(response.values, reduce: metricRequest.reduce)
-            })
-        }
-    }
-
-    private func queryInsightsSummaryMetric(_ metricRequest: MetricRequest, universeId: Int64, cookie: String, completion: @escaping (Result<Double?, Error>) -> Void) {
-        let url = insightsBaseURL
-            .appendingPathComponent("v2")
-            .appendingPathComponent("universes")
-            .appendingPathComponent(String(universeId))
-            .appendingPathComponent("insights")
-            .appendingPathComponent("metrics-summary")
-
-        let query = CreatorHubInsightsQuery(
+        let query = CreatorHubAnalyticsQuery(
             resourceType: "RESOURCE_TYPE_UNIVERSE",
             resourceId: String(universeId),
             metric: metricRequest.metric.rawValue,
-            granularity: "METRIC_GRANULARITY_ONE_DAY",
+            granularity: metricRequest.granularity,
             breakdown: [],
-            filter: [],
             startTime: iso8601.string(from: metricRequest.startTime),
-            endTime: iso8601.string(from: metricRequest.endTime),
-            limit: 400
+            endTime: iso8601.string(from: metricRequest.endTime)
         )
 
-        let body = CreatorHubInsightsSummaryRequest(
-            universeId: universeId,
-            input: CreatorHubInsightsSummaryInput(
-                startUtcTime: iso8601.string(from: metricRequest.startTime),
-                endUtcTime: iso8601.string(from: metricRequest.endTime),
-                queries: [query],
-                pageKey: "RobloxStatsBar"
-            )
+        let body = CreatorHubAnalyticsRequest(
+            resourceType: "RESOURCE_TYPE_UNIVERSE",
+            resourceId: String(universeId),
+            query: query
         )
 
-        requestData(url: url, cookie: cookie, body: body, contentType: "application/json") { result in
-            completion(result.map { data in
-                self.valueFromInsightsSummary(data, metric: metricRequest.metric.rawValue, reduce: metricRequest.reduce)
+        request(url: url, cookie: cookie, body: body, contentType: "application/json", ignoreBadRequest: true) { (result: Result<CreatorHubAnalyticsResponse, Error>) in
+            completion(result.map { response in
+                self.aggregate(response.operation?.queryResult?.values, reduce: metricRequest.reduce)
             })
         }
     }
@@ -252,9 +211,10 @@ final class CreatorHubScraper {
         csrfToken: String? = nil,
         body: Body,
         contentType: String,
+        ignoreBadRequest: Bool = false,
         completion: @escaping (Result<T, Error>) -> Void
     ) {
-        requestData(url: url, cookie: cookie, csrfToken: csrfToken, body: body, contentType: contentType) { result in
+        requestData(url: url, cookie: cookie, csrfToken: csrfToken, body: body, contentType: contentType, ignoreBadRequest: ignoreBadRequest) { result in
             completion(result.flatMap { data in
                 do {
                     return .success(try JSONDecoder().decode(T.self, from: data))
@@ -271,6 +231,7 @@ final class CreatorHubScraper {
         csrfToken: String? = nil,
         body: Body,
         contentType: String,
+        ignoreBadRequest: Bool = false,
         completion: @escaping (Result<Data, Error>) -> Void
     ) {
         var request = URLRequest(url: url)
@@ -302,7 +263,13 @@ final class CreatorHubScraper {
                 if httpResponse.statusCode == 403,
                    csrfToken == nil,
                    let retryToken = httpResponse.value(forHTTPHeaderField: "x-csrf-token") {
-                    self.requestData(url: url, cookie: cookie, csrfToken: retryToken, body: body, contentType: contentType, completion: completion)
+                    self.requestData(url: url, cookie: cookie, csrfToken: retryToken, body: body, contentType: contentType, ignoreBadRequest: ignoreBadRequest, completion: completion)
+                    return
+                }
+
+                if httpResponse.statusCode == 400, ignoreBadRequest {
+                    let emptyResponse = #"{"operation":{"done":true,"queryResult":{"values":[]}}}"#
+                    completion(.success(Data(emptyResponse.utf8)))
                     return
                 }
 
@@ -347,6 +314,15 @@ final class CreatorHubScraper {
             )
         }
 
+        let chromeResult = chromeCookieImporter.roblosecurityCookie()
+        if let cookie = chromeResult.cookie,
+           let normalized = normalize(cookie: cookie) {
+            return CreatorHubSessionLoadResult(
+                session: CreatorHubSession(cookie: normalized, source: "Chrome"),
+                skippedReason: ""
+            )
+        }
+
         if let raw = try? String(contentsOf: cookieURL, encoding: .utf8),
            let normalized = normalize(cookie: raw) {
             return CreatorHubSessionLoadResult(
@@ -355,18 +331,9 @@ final class CreatorHubScraper {
             )
         }
 
-        let safariResult = safariCookieImporter.roblosecurityCookie()
-        if let cookie = safariResult.cookie,
-           let normalized = normalize(cookie: cookie) {
-            return CreatorHubSessionLoadResult(
-                session: CreatorHubSession(cookie: normalized, source: "Safari"),
-                skippedReason: ""
-            )
-        }
-
         return CreatorHubSessionLoadResult(
             session: nil,
-            skippedReason: safariResult.failureReason ?? "No readable Roblox session found"
+            skippedReason: chromeResult.failureReason ?? "No readable Roblox session found"
         )
     }
 
@@ -427,62 +394,6 @@ final class CreatorHubScraper {
         return formatter
     }()
 
-    private func valueFromInsightsSummary(_ data: Data, metric: String, reduce: CreatorHubMetricReduce) -> Double? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) else {
-            return nil
-        }
-
-        var values: [Double] = []
-        collectInsightValues(json, matching: metric, into: &values)
-
-        guard !values.isEmpty else {
-            return nil
-        }
-
-        switch reduce {
-        case .sum:
-            return values.reduce(0, +)
-        case .latest:
-            return values.last
-        }
-    }
-
-    private func collectInsightValues(_ object: Any, matching metric: String, into values: inout [Double]) {
-        if let dictionary = object as? [String: Any] {
-            if dictionary["metric"] as? String == metric {
-                appendMetricValues(from: dictionary, into: &values)
-            }
-
-            for value in dictionary.values {
-                collectInsightValues(value, matching: metric, into: &values)
-            }
-        } else if let array = object as? [Any] {
-            for value in array {
-                collectInsightValues(value, matching: metric, into: &values)
-            }
-        }
-    }
-
-    private func appendMetricValues(from dictionary: [String: Any], into values: inout [Double]) {
-        let preferredKeys = [
-            "currentValue",
-            "metricCurrentValue",
-            "value",
-            "absoluteChange",
-            "dropoffPercentage",
-            "churnRate",
-        ]
-
-        for key in preferredKeys {
-            if let value = dictionary[key] as? Double {
-                values.append(value)
-            } else if let value = dictionary[key] as? Int {
-                values.append(Double(value))
-            } else if let value = dictionary[key] as? NSNumber {
-                values.append(value.doubleValue)
-            }
-        }
-    }
 }
 
 private struct CreatorHubSession {
@@ -498,16 +409,10 @@ private struct CreatorHubSessionLoadResult {
 private struct MetricRequest {
     let slot: CreatorHubMetricSlot
     let metric: CreatorHubMetric
-    let backend: CreatorHubMetricBackend
     let startTime: Date
     let endTime: Date
-    let aggregationType: String
+    let granularity: String
     let reduce: CreatorHubMetricReduce
-}
-
-private enum CreatorHubMetricBackend {
-    case monetization
-    case insightsSummary
 }
 
 private enum CreatorHubMetricSlot {
@@ -532,81 +437,45 @@ private enum CreatorHubMetricReduce {
     case latest
 }
 
-private struct CreatorHubMetricRequestBody: Encodable {
-    let metric: String
-    let aggregationType: String
-    let granularity: String
-    let startTime: String
-    let endTime: String
-    let breakdown: [String]
-    let filters: [CreatorHubMetricFilter]
-
-    init(
-        metric: String,
-        aggregationType: String,
-        granularity: String,
-        startTime: String,
-        endTime: String,
-        breakdown: [String],
-        filters: [CreatorHubMetricFilter]
-    ) {
-        self.metric = metric
-        self.aggregationType = aggregationType
-        self.granularity = granularity
-        self.startTime = startTime
-        self.endTime = endTime
-        self.breakdown = breakdown
-        self.filters = filters
-    }
+private struct CreatorHubAnalyticsRequest: Encodable {
+    let resourceType: String
+    let resourceId: String
+    let query: CreatorHubAnalyticsQuery
 }
 
-private struct CreatorHubMetricFilter: Encodable {
-    let dimension: String
-    let values: [String]
-}
-
-private struct CreatorHubMetricResponse: Decodable {
-    let values: [CreatorHubMetricSeries]?
-    let inProgress: Bool?
-}
-
-private struct CreatorHubMetricSeries: Decodable {
-    let breakdowns: [CreatorHubMetricBreakdown]?
-    let datapoints: [CreatorHubMetricDataPoint]?
-}
-
-private struct CreatorHubMetricBreakdown: Decodable {
-    let dimension: String?
-    let value: String?
-    let displayValue: String?
-}
-
-private struct CreatorHubMetricDataPoint: Decodable {
-    let timestamp: String?
-    let value: Double?
-    let tag: String?
-}
-
-private struct CreatorHubInsightsSummaryRequest: Encodable {
-    let universeId: Int64
-    let input: CreatorHubInsightsSummaryInput
-}
-
-private struct CreatorHubInsightsSummaryInput: Encodable {
-    let startUtcTime: String
-    let endUtcTime: String
-    let queries: [CreatorHubInsightsQuery]
-    let pageKey: String
-}
-
-private struct CreatorHubInsightsQuery: Encodable {
+private struct CreatorHubAnalyticsQuery: Encodable {
     let resourceType: String
     let resourceId: String
     let metric: String
     let granularity: String
     let breakdown: [String]
-    let filter: [CreatorHubMetricFilter]
     let startTime: String
     let endTime: String
-    let limit: Int
+}
+
+private struct CreatorHubAnalyticsResponse: Decodable {
+    let operation: CreatorHubAnalyticsOperation?
+}
+
+private struct CreatorHubAnalyticsOperation: Decodable {
+    let done: Bool?
+    let queryResult: CreatorHubAnalyticsQueryResult?
+}
+
+private struct CreatorHubAnalyticsQueryResult: Decodable {
+    let values: [CreatorHubMetricSeries]?
+}
+
+private struct CreatorHubMetricSeries: Decodable {
+    let breakdownValue: [String]?
+    let dataPoints: [CreatorHubMetricDataPoint]?
+
+    var datapoints: [CreatorHubMetricDataPoint]? {
+        dataPoints
+    }
+}
+
+private struct CreatorHubMetricDataPoint: Decodable {
+    let timestamp: String?
+    let value: Double?
 }

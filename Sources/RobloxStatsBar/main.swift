@@ -126,6 +126,7 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         sessionItem.target = self
         config = configStore.load()
 
+        configureApplicationMenu()
         configureStatusItem()
         rebuildMenu()
         refresh()
@@ -152,6 +153,29 @@ final class RobloxStatsBarApp: NSObject, NSApplicationDelegate {
         setStatusText("--")
         button.toolTip = "Roblox stats"
         statusItem.menu = statusMenu
+    }
+
+    private func configureApplicationMenu() {
+        let mainMenu = NSMenu()
+
+        let applicationMenuItem = NSMenuItem()
+        mainMenu.addItem(applicationMenuItem)
+
+        let applicationMenu = NSMenu()
+        applicationMenuItem.submenu = applicationMenu
+        applicationMenu.addItem(NSMenuItem(title: "Quit Roblox Stats Bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+        editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+
+        NSApp.mainMenu = mainMenu
     }
 
     private func robloxTemplateIcon() -> NSImage {

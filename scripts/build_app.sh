@@ -13,11 +13,13 @@ mkdir -p "${binary_dir}" "${macos_dir}"
 
 swiftc -O \
   Sources/RobloxStatsBar/AppConfig.swift \
+  Sources/RobloxStatsBar/ChromeCookieImporter.swift \
   Sources/RobloxStatsBar/CreatorHubScraper.swift \
   Sources/RobloxStatsBar/DashboardMetricsStore.swift \
   Sources/RobloxStatsBar/RobloxAPI.swift \
-  Sources/RobloxStatsBar/SafariCookieImporter.swift \
   Sources/RobloxStatsBar/main.swift \
+  -framework Security \
+  -lsqlite3 \
   -o "${binary_dir}/RobloxStatsBar"
 
 rm -rf "${app_dir}"

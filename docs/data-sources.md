@@ -24,7 +24,7 @@ The menu can display these metrics from a local cache:
 - Performance error count
 - Playthrough rate
 
-On startup and refresh, the app attempts to fetch Creator Hub metrics from authenticated private dashboard endpoints when a local Roblox cookie is configured. Use `Update Creator Hub Metrics...` to fetch a selected game on demand or save values manually after checking Creator Hub.
+On startup and refresh, the app attempts to fetch Creator Hub metrics from authenticated private dashboard endpoints by reading the active Chrome Roblox session. Use `Update Creator Hub Metrics...` to fetch a selected game on demand or save values manually after checking Creator Hub.
 
 The cache lives at:
 
@@ -32,13 +32,13 @@ The cache lives at:
 ~/.config/roblox-stats-bar/dashboard-metrics.json
 ```
 
-The optional local cookie file lives at:
+The optional local cookie fallback lives at:
 
 ```text
 ~/.config/roblox-stats-bar/roblox-cookie.txt
 ```
 
-That file can contain either the raw cookie value or `.ROBLOSECURITY=<value>`. It is intentionally ignored by git.
+The app first tries Chrome's encrypted local cookie store and decrypts the Roblox session through Chrome's macOS Keychain secret. This file can contain either the raw cookie value or `.ROBLOSECURITY=<value>` as a fallback. It is intentionally ignored by git.
 
 ## API boundary
 
